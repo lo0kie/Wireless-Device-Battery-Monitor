@@ -229,7 +229,9 @@ LRESULT CALLBACK StyleProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_NCCREATE) {
         auto* create = reinterpret_cast<CREATESTRUCTW*>(lp);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)create->lpCreateParams);
-        return TRUE;
+        // Let DefWindowProc finish non-client setup (including the window caption); returning TRUE
+        // here directly leaves the title bar text empty even though CreateWindowExW was given one.
+        return DefWindowProcW(hwnd, msg, wp, lp);
     }
     StyleState* state = State(hwnd);
     if (!state) return DefWindowProcW(hwnd, msg, wp, lp);
@@ -283,7 +285,7 @@ LRESULT CALLBACK StyleProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 }  // namespace
 
-bool PromptTextStyle(HWND owner, const widget::TextStyle& current, widget::TextStyle& result,
+bool PromptTextStyle(HWND owner, const wchar_t* title, const widget::TextStyle& current, widget::TextStyle& result,
                      const std::function<void(const widget::TextStyle&)>& onApply) {
     HINSTANCE inst = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{ sizeof(wc) };
@@ -300,7 +302,7 @@ bool PromptTextStyle(HWND owner, const widget::TextStyle& current, widget::TextS
     state.initial = current;
     dlg::Shell shell;
     shell.className = kWindowClass;
-    shell.title = T(L"Text style");
+    shell.title = T(title);
     shell.clientW = kClientW;
     shell.clientH = kClientH;
     shell.state = &state;

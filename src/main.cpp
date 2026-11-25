@@ -62,7 +62,7 @@ constexpr UINT ALERT_ICON_ID = 2;
 
 enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
-    ID_BRAND_COLORS, ID_STACKED, ID_DEVICE_DIVIDER, ID_SHOW_DISCONNECTED, ID_RECORD_HISTORY, ID_DIM_SLEEPING,
+    ID_BRAND_COLORS, ID_STACKED, ID_DEVICE_DIVIDER, ID_SHOW_TOOLTIP, ID_SHOW_DISCONNECTED, ID_RECORD_HISTORY, ID_DIM_SLEEPING,
     ID_TRAY_WHEN_EMPTY, ID_MAKE_ROOM, ID_FAR_LEFT, ID_PERCENT_SIGN, ID_RING_STYLE, ID_BEFORE_APPS, ID_CONNECTION_ICONS, ID_KEEP_MOUSE_LAST_KNOWN,
     ID_PLACE_AUTO, ID_PLACE_TOP, ID_PLACE_TRAY, ID_PLACE_BOTTOM, ID_TEXT_STYLE,  // "Position on a vertical taskbar"
     ID_POSITION_FIRST = 700,  // "Position on the taskbar": ID_POSITION_FIRST + 0..5, then the custom value
@@ -111,6 +111,7 @@ widget::TextStyle g_textStyle;  // font, size and spacing of the taskbar strip (
 bool g_ringStyle = false;  // device icon inside a battery ring (menu option, PR #110)
 bool g_connectionIcons = false;  // wireless mark for 2.4 GHz devices (menu option, PR #2277)
 bool g_deviceDivider = false;    // thin line between neighbouring devices on the taskbar (menu option)
+bool g_showTooltip = true;       // hover tip listing device levels (menu option)
 bool g_makeRoom = true;      // step past other apps' taskbar widgets (menu option)
 // "Position on the taskbar": distance from the notification area in DPI-independent pixels. Stored as
 // the TaskbarOffset value the widget has always read, so a value set by hand keeps working.
@@ -435,6 +436,7 @@ bool LoadRingStyle() { return LoadBoolSetting(L"RingStyle", false); }
 void SaveRingStyle(bool on) { SaveBoolSetting(L"RingStyle", on); }
 bool LoadConnectionIcons() { return LoadBoolSetting(L"ConnectionIcons", false); }
 bool LoadDeviceDivider() { return LoadBoolSetting(L"DeviceDivider", false); }
+bool LoadShowTooltip() { return LoadBoolSetting(L"ShowTooltip", true); }
 void SaveConnectionIcons(bool on) { SaveBoolSetting(L"ConnectionIcons", on); }
 widget::VerticalPlace LoadVerticalPlace() {
     DWORD v = 0, sz = sizeof(v);
@@ -1053,6 +1055,12 @@ void SetDeviceDivider(bool on) {
     widget::SetDeviceDivider(on);
 }
 
+void SetShowTooltip(bool on) {
+    g_showTooltip = on;
+    SaveBoolSetting(L"ShowTooltip", on);
+    widget::SetTooltip(on);
+}
+
 void SetRingStyle(bool on) {
     g_ringStyle = on;
     SaveRingStyle(on);
@@ -1167,7 +1175,7 @@ void RenameDevice(const std::wstring& key) {
         UpdateWidget();
     };
     std::wstring chosen;
-    if (!PromptDeviceName(g_hwnd, DisplayName(it->second), chosen,
+    if (!PromptDeviceName(g_hwnd, L"Rename device", DisplayName(it->second), chosen,
                           [&](const std::wstring& n) { applyName(n); }))
         return;
     applyName(chosen);
@@ -1389,6 +1397,10 @@ void ShowMenu(bool settings) {
         divider.checked = g_deviceDivider;
         divider.disabled = !g_wantWidget;
         modeSub.push_back(divider);
+        Item tip = raw(T(L"Show tooltip"), ID_SHOW_TOOLTIP);
+        tip.checked = g_showTooltip;
+        tip.disabled = !g_wantWidget;
+        modeSub.push_back(tip);
         modeSub.push_back(sep());
         modeSub.push_back(raw(T(L"Text style..."), ID_TEXT_STYLE));  // also styles the tray digits
         Item mode = raw(T(L"Display style"), 0);
@@ -1630,7 +1642,7 @@ void ShowMenu(bool settings) {
         case ID_PERCENT_SIGN: SetShowPercentSign(!g_showPercentSign); break;
         case ID_TEXT_STYLE: {
             widget::TextStyle style = g_textStyle;
-            if (PromptTextStyle(g_hwnd, style, style,
+            if (PromptTextStyle(g_hwnd, L"Text style", style, style,
                                 [](const widget::TextStyle& s) { ApplyTextStyle(s); }))
                 ApplyTextStyle(style);
             break;
@@ -1638,6 +1650,7 @@ void ShowMenu(bool settings) {
         case ID_RING_STYLE: SetRingStyle(!g_ringStyle); break;
         case ID_CONNECTION_ICONS: SetConnectionIcons(!g_connectionIcons); break;
         case ID_DEVICE_DIVIDER: SetDeviceDivider(!g_deviceDivider); break;
+        case ID_SHOW_TOOLTIP: SetShowTooltip(!g_showTooltip); break;
         case ID_MAKE_ROOM: SetMakeRoom(!g_makeRoom); break;
         case ID_PLACE_AUTO: SetWidgetPlace(widget::VerticalPlace::Auto); break;
         case ID_PLACE_TOP: SetWidgetPlace(widget::VerticalPlace::Top); break;
@@ -1665,7 +1678,7 @@ void ShowMenu(bool settings) {
             }
             if (cmd == ID_POSITION_FIRST + ARRAYSIZE(POSITION_OFFSETS)) {
                 int px = 0;
-                if (PromptTaskbarOffset(g_hwnd, LoadTaskbarOffset(), px,
+                if (PromptTaskbarOffset(g_hwnd, L"Position on the taskbar", LoadTaskbarOffset(), px,
                                         [](int v) { SetTaskbarOffset(v); }))
                     SetTaskbarOffset(px);
                 break;
@@ -2154,6 +2167,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     widget::SetConnectionIcons(g_connectionIcons);
     g_deviceDivider = LoadDeviceDivider();
     widget::SetDeviceDivider(g_deviceDivider);
+    g_showTooltip = LoadShowTooltip();
+    widget::SetTooltip(g_showTooltip);
     g_verticalPlace = LoadVerticalPlace();
     widget::SetVerticalPlace(g_verticalPlace);
     widget::SetFarLeft(g_farLeft);

@@ -100,6 +100,7 @@ Letter spacing (px) =
 Ring style =
 Mark connection type =
 Separator between devices =
+Show tooltip =
 Position on the taskbar = 
 Next to the notification area = 
 {px} px from the notification area = 

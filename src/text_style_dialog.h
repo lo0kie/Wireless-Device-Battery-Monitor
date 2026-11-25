@@ -15,8 +15,9 @@ constexpr float kMinDividerGap = 0.0f, kMaxDividerGap = 30.0f;
 constexpr float kMinLetterSpacing = -2.0f, kMaxLetterSpacing = 12.0f;
 
 // Native, modal Win32 editor for the taskbar strip's font, size and spacing. Returns false if cancelled.
+// `title` is the English caption phrase, translated inside via T().
 // `onApply`, when set, is called by the dialog's Apply button with the values currently entered, so
 // the change takes effect without closing the window. Returning from the dialog with Save still
 // reports the same values through `result`.
-bool PromptTextStyle(HWND owner, const widget::TextStyle& current, widget::TextStyle& result,
+bool PromptTextStyle(HWND owner, const wchar_t* title, const widget::TextStyle& current, widget::TextStyle& result,
                      const std::function<void(const widget::TextStyle&)>& onApply = {});

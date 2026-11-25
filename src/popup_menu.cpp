@@ -1248,8 +1248,26 @@ void PlaceRoot(Session& s, Popup& p) {
     SetWindowPos(p.hwnd, HWND_TOPMOST, x, y, p.width, p.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
+// A row gets the hand cursor only when clicking it runs a command. Rows that merely expand a
+// submenu on hover, plus headers/separators/disabled rows, keep the arrow. RowAt already filters
+// out the non-Normal and disabled rows; `children` distinguishes action rows from submenu entries.
+void ApplyCursor(Popup* over, POINT screen) {
+    bool clickable = false;
+    if (over) {
+        int row = RowAt(*over, screen);
+        if (row >= 0) {
+            const Item& it = (*over->items)[over->rows[row].index];
+            clickable = it.children.empty();
+        }
+    }
+    static HCURSOR hand = LoadCursorW(nullptr, IDC_HAND);
+    static HCURSOR arrow = LoadCursorW(nullptr, IDC_ARROW);
+    SetCursor(clickable ? hand : arrow);
+}
+
 void OnMouseMove(Session& s, POINT screen) {
     Popup* target = PopupAtPoint(s, screen);
+    ApplyCursor(target, screen);
     // Clear the scrollbar hover state everywhere it no longer applies (and repaint to un-highlight).
     for (Popup* q : s.open) {
         if (q->scrollHot && q != target) { q->scrollHot = false; Repaint(*q); }
@@ -1466,6 +1484,27 @@ LRESULT CALLBACK PopupProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_MOUSEACTIVATE:
             return MA_ACTIVATE;
+        case WM_NCHITTEST: {
+            // A layered window reports HTTRANSPARENT over its transparent pixels, which suppresses
+            // WM_SETCURSOR. Report the whole panel as client area so the cursor can be updated.
+            POINT pt{ (short)LOWORD(lp), (short)HIWORD(lp) };
+            RECT r{};
+            if (p && GetWindowRect(p->hwnd, &r) && pt.x >= r.left && pt.x < r.right &&
+                pt.y >= r.top && pt.y < r.bottom)
+                return HTCLIENT;
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        }
+        case WM_SETCURSOR: {
+            // Use the popup under the pointer (not `p`) because the root holds mouse capture and
+            // receives these messages even when the pointer is over a submenu. ApplyCursor applies
+            // the same action-vs-submenu rule as the mouse-move path.
+            if (s->running) {
+                POINT pt;
+                GetCursorPos(&pt);
+                ApplyCursor(PopupAtPoint(*s, pt), pt);
+            }
+            return TRUE;
+        }
         case WM_MOUSEMOVE:
             if (isRoot && s->running) {
                 POINT pt;
@@ -1646,6 +1685,13 @@ bool Show(HWND owner, POINT at, const std::vector<Item>& items, const Options& o
     if (GetCapture() != root->hwnd) {
         SetCapture(root->hwnd);
         s.captured = (GetCapture() == root->hwnd);
+    }
+    // The pointer may already sit over a row when the menu opens (no WM_MOUSEMOVE will fire until it
+    // moves). Seed the hover highlight and cursor from its current position.
+    {
+        POINT pt;
+        GetCursorPos(&pt);
+        OnMouseMove(s, pt);
     }
 
     // Peek-driven loop: process pending messages, then advance scroll easing once per turn. A

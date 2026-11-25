@@ -20,6 +20,7 @@ bool g_showPercentSign = true;  // '%' after numeric levels (menu option, PR #13
 bool g_ringStyle;   // device icon inside a ring that fills with the charge (menu option, PR #110)
 bool g_connectionIcons;  // wireless mark after 2.4 GHz devices' levels (menu option, PR #2277)
 bool g_deviceDivider;    // thin line between neighbouring devices on the taskbar (menu option)
+bool g_showTooltip = true;  // hover tip listing device levels (menu option)
 bool g_vertical;    // the primary taskbar is docked left or right: one block per device, stacked (PR #321)
 bool g_makeRoom = true;  // step past other apps' widgets in the taskbar instead of covering them
 widget::VerticalPlace g_place = widget::VerticalPlace::Auto;  // where the column sits on such a taskbar (menu option)
@@ -1373,6 +1374,7 @@ bool Create(HINSTANCE inst, HWND notifyWnd, UINT clickMsg, bool lightTheme) {
         ti.lpszText = const_cast<wchar_t*>(L"BatteryHub");
         SendMessageW(g_tip, TTM_ADDTOOLW, 0, (LPARAM)&ti);
         SendMessageW(g_tip, TTM_SETMAXTIPWIDTH, 0, 600);
+        SendMessageW(g_tip, TTM_ACTIVATE, g_showTooltip ? TRUE : FALSE, 0);
     }
     WatchWidgetsButton(g_taskbar);
     g_lastDpi = Dpi();
@@ -1453,6 +1455,13 @@ void SetDeviceDivider(bool on) {
     g_deviceDivider = on;
     PaintAll();
     if (g_wnd) Reposition();
+}
+
+void SetTooltip(bool on) {
+    g_showTooltip = on;
+    // TTM_ACTIVATE turns the whole tooltip off without dropping the tools, so toggling back on
+    // keeps the current text and works on all the mirror taskbars too.
+    if (g_tip) SendMessageW(g_tip, TTM_ACTIVATE, on ? TRUE : FALSE, 0);
 }
 
 void SetRingStyle(bool on) {

@@ -62,6 +62,8 @@ void SetRingStyle(bool on);
 void SetConnectionIcons(bool on);
 // Draw a thin separator between neighbouring devices on the taskbar (kept across Create/Destroy).
 void SetDeviceDivider(bool on);
+// Show the hover tooltip listing device levels (kept across Create/Destroy).
+void SetTooltip(bool on);
 // Steps past other apps' widgets in the taskbar (e.g. a network graph or a countdown) that sit where the
 // strip would go, so both stay readable (kept across Create/Destroy).
 void SetMakeRoom(bool on);

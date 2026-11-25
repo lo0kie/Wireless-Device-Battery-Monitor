@@ -96,6 +96,7 @@ Letter spacing (px) = 字距（像素）
 Ring style = 环形样式
 Mark connection type = 标记连接方式
 Separator between devices = 设备之间分隔线
+Show tooltip = 显示悬浮提示
 Position on the taskbar = 任务栏上的位置
 Next to the notification area = 通知区域旁边
 {px} px from the notification area = 距通知区域 {px}px

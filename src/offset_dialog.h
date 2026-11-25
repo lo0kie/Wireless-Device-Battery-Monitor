@@ -9,5 +9,7 @@ constexpr int kMinTaskbarOffset = -1000;
 constexpr int kMaxTaskbarOffset = 3000;
 
 // Native, modal Win32 editor for a custom taskbar position. Returns false if the user cancels.
+// `title` is the English caption phrase, translated inside via T().
 // `onApply` is the Apply button: it moves the widget immediately, without closing the dialog.
-bool PromptTaskbarOffset(HWND owner, int current, int& result, const std::function<void(int)>& onApply = {});
+bool PromptTaskbarOffset(HWND owner, const wchar_t* title, int current, int& result,
+                         const std::function<void(int)>& onApply = {});
