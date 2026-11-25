@@ -16,6 +16,7 @@
 //    protocol documentation; shared framing also used by the existing Kysona driver.
 #include "drivers.h"
 #include <algorithm>
+#include <numeric>
 
 namespace {
 
@@ -115,8 +116,7 @@ const PairedModel* FindPaired(unsigned pid) {
 
 // Corsair Compx battery protocol (17-byte reports).
 BYTE CorsairCompxChecksum(const BYTE* b) {
-    unsigned sum = 0;
-    for (int i = 0; i < 16; i++) sum += b[i];
+    const unsigned sum = std::accumulate(b, b + 16, 0u);
     return (BYTE)(0x55 - sum);
 }
 bool CorsairCompxQuery(HidDev& d, BYTE cmd, std::vector<BYTE>& r) {

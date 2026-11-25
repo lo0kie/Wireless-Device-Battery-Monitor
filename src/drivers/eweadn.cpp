@@ -18,6 +18,7 @@
 // The reply echoes the sequence number in byte 4.
 // Only these two read commands are sent; nothing is ever written to the mouse's settings.
 #include "drivers.h"
+#include <numeric>
 
 namespace {
 constexpr USHORT kVid = 0x372E;
@@ -51,8 +52,7 @@ bool Query(HidDev& d, const Model& m, BYTE cmd, BYTE sub, std::vector<BYTE>& dat
     req[4] = sn;
     req[5] = cmd;
     req[6] = sub;
-    unsigned sum = 0;
-    for (size_t i = 1; i < req.size(); ++i) sum += req[i];
+    const unsigned sum = std::accumulate(req.begin() + 1, req.end(), 0u);
     req[1] = static_cast<BYTE>(sum & 0xFF);
     if (!d.SetFeature(req)) return false;
     for (int attempt = 0; attempt < 3; ++attempt) {

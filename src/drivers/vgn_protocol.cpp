@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <numeric>
 
 namespace Vgn {
 
@@ -49,15 +50,13 @@ namespace {
 
 // A 16-byte Da-family frame ends with 85 - sum(bytes 0..14), minus the report id.
 uint8_t DaChecksum(const uint8_t* frame, uint8_t reportId) {
-    unsigned sum = 0;
-    for (int i = 0; i < 15; i++) sum += frame[i];
+    const unsigned sum = std::accumulate(frame, frame + 15, 0u);
     return (uint8_t)(((85 - (sum & 0xFF)) - reportId) & 0xFF);
 }
 
 // The rongyuan feature frame stores 255 - sum(bytes 0..6) at [7].
 uint8_t RongyuanChecksum(const uint8_t* frame) {
-    unsigned sum = 0;
-    for (int i = 0; i < 7; i++) sum += frame[i];
+    const unsigned sum = std::accumulate(frame, frame + 7, 0u);
     return (uint8_t)((255 - (sum & 0xFF)) & 0xFF);
 }
 
@@ -165,8 +164,7 @@ size_t BuildBeiyingOutputRequest(uint8_t* out, size_t cap, uint8_t cmd, uint8_t 
     memset(out, 0, 19);
     out[0] = cmd;  // 74 = battery
     out[1] = sub;
-    unsigned sum = reportId;
-    for (int i = 0; i < 18; i++) sum += out[i];
+    const unsigned sum = std::accumulate(out, out + 18, (unsigned)reportId);
     out[18] = (uint8_t)(sum & 0xFF);
     return 19;
 }

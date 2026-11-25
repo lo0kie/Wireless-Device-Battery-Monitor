@@ -12,6 +12,7 @@
 #include "drivers.h"
 
 #include <algorithm>
+#include <numeric>
 
 namespace {
 
@@ -21,8 +22,7 @@ bool Query(HidDev& d, BYTE cmd, std::vector<BYTE>& r, int deadlineMs) {
     std::vector<BYTE> req(17, 0);
     req[0] = 0x08;
     req[1] = cmd;
-    unsigned sum = 0;
-    for (int i = 0; i < 16; i++) sum += req[i];
+    const unsigned sum = std::accumulate(req.begin(), req.begin() + 16, 0u);
     req[16] = (BYTE)(0x55 - sum);
     ULONGLONG end = GetTickCount64() + deadlineMs;
     d.Flush();

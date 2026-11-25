@@ -73,6 +73,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <numeric>
 
 namespace {
 
@@ -269,8 +270,7 @@ void PollAjazz(PollContext& ctx) {
                 std::vector<BYTE> r;
                 bool ok = ReadUntil(d, r, 1500, [](const std::vector<BYTE>& r) {
                     if (r.size() < 32 || r[0] != 0x10 || r[1] != 0x00) return false;
-                    unsigned sum = 0;
-                    for (int i = 4; i <= 30; i++) sum += r[i];
+                    const unsigned sum = std::accumulate(r.begin() + 4, r.begin() + 31, 0u);
                     return (BYTE)sum == r[31];
                 });
                 if (!ok || r[13] > 100) continue;

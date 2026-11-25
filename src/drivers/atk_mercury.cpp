@@ -84,9 +84,8 @@ bool ReadBattery(const HidColl& c, int& percent) {
 void PollAtkMercury(PollContext& ctx) {
     if (ctx.IsClaimed(kVid, kPid)) return;
 
-    bool present = false;
-    for (const HidColl& c : ctx.colls)
-        present |= c.vid == kVid && c.pid == kPid;
+    const bool present = std::any_of(ctx.colls.begin(), ctx.colls.end(),
+        [](const HidColl& c) { return c.vid == kVid && c.pid == kPid; });
     if (!present) return;
 
     // This VID:PID belongs to the headset receiver even if its firmware or collection layout is

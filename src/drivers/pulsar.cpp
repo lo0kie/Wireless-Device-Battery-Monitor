@@ -38,6 +38,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <numeric>
 
 namespace {
 
@@ -105,8 +106,7 @@ Reply Query(HidDev& d, BYTE cat, BYTE reg, BYTE sub, std::vector<BYTE>& w) {
     p[1] = cat;
     p[2] = reg;
     p[3] = sub;
-    unsigned sum = 0;
-    for (int i = 0; i < 62; i++) sum += p[i];
+    const unsigned sum = std::accumulate(p, p + 62, 0u);
     p[62] = (BYTE)(sum & 0xFF);
     p[63] = (BYTE)(sum >> 8);
     bool sawOffline = false;

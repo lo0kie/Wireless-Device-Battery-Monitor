@@ -431,8 +431,8 @@ void PollSc580(PollContext& ctx) {
     const std::wstring key = L"aula:sc580";  // one entry when the mouse charges on the cable next to its receiver
     for (const auto& m : kSc580) {
         if (ctx.IsClaimed(m.vid, m.pid)) continue;
-        bool listed = false;
-        for (const auto& o : ctx.out) listed |= o.key == key;
+        const bool listed = std::any_of(ctx.out.begin(), ctx.out.end(),
+            [&](const DeviceStatus& o) { return o.key == key; });
         if (listed) {  // the cable answered first: leave the receiver alone
             ctx.Claim(m.vid, m.pid);
             continue;

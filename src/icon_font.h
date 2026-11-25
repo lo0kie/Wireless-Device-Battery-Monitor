@@ -17,7 +17,7 @@ HFONT Font(int px, int weight = FW_NORMAL);
 // Glyph table, switched by Init(): Material Icons when available, otherwise the original Segoe codes.
 struct Glyphs {
     wchar_t headset, mouse, keyboard, gamepad, phone, microphone, speaker, bluetooth, devices;
-    wchar_t bolt, check, wifi, batteryUnknown, batteryFull, battery, batteryCharging, batteryAlert, offline;
+    wchar_t bolt, check, wifi, batteryUnknown, batteryFull, battery, batteryCharging, batteryAlert, offline, usb;
     wchar_t rename, alerts, history, monitor, globe, stopwatch, refresh, help, support, update, exit;
     wchar_t chevronRight;  // menu submenu arrow, from the same icon set
     wchar_t batteryBars[7];              // battery_0_bar .. battery_6_bar (charge level)

@@ -74,10 +74,12 @@ bool Run(HWND owner, const Shell& shell) {
         const int right = MulDiv(shell.clientW, dpi, 96) - pad;
         const int y = MulDiv(shell.clientH, dpi, 96) - pad - bh;
         struct Button { int slot; const wchar_t* text; int id; DWORD style; };
+        // Created left to right so Tab follows the visual order (Cancel, Apply, Save), as in every
+        // Windows dialog. `slot` only decides the x position; Save keeps the default-button style.
         const Button buttons[] = {
-            { 0, T(L"Save"), IDOK, BS_DEFPUSHBUTTON },
-            { 1, T(L"Apply"), kIdApply, 0 },
             { 2, T(L"Cancel"), IDCANCEL, 0 },
+            { 1, T(L"Apply"), kIdApply, 0 },
+            { 0, T(L"Save"), IDOK, BS_DEFPUSHBUTTON },
         };
         for (const Button& b : buttons) {
             const int x = right - (b.slot + 1) * bw - b.slot * gap;
@@ -95,7 +97,14 @@ bool Run(HWND owner, const Shell& shell) {
     SetForegroundWindow(dialog);
     if (HWND focus = shell.focusId ? GetDlgItem(dialog, shell.focusId) : nullptr) {
         SetFocus(focus);
-        SendMessageW(focus, EM_SETSEL, 0, -1);  // start with the current value selected, like Windows
+        // Start with the current value selected, like Windows. An editable combo needs its own
+        // message; EM_SETSEL sent to the combo itself is ignored, so typing would append instead.
+        wchar_t cls[32] = {};
+        GetClassNameW(focus, cls, ARRAYSIZE(cls));
+        if (wcscmp(cls, L"ComboBox") == 0)
+            SendMessageW(focus, CB_SETEDITSEL, 0, MAKELPARAM(0, -1));
+        else
+            SendMessageW(focus, EM_SETSEL, 0, -1);
     }
 
     MSG msg{};

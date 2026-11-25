@@ -8,6 +8,7 @@
 #include "drivers.h"
 
 #include <cwctype>
+#include <numeric>
 
 namespace {
 
@@ -18,16 +19,14 @@ std::vector<BYTE> Frame(BYTE op) {
     std::vector<BYTE> d(17, 0);
     d[0] = 0x08;
     d[1] = op;
-    unsigned sum = 0;
-    for (int i = 0; i < 16; i++) sum += d[i];
+    const unsigned sum = std::accumulate(d.begin(), d.begin() + 16, 0u);
     d[16] = (BYTE)(0x55 - sum);
     return d;
 }
 
 bool Payload(const std::vector<BYTE>& r, int n, BYTE op, std::vector<BYTE>& out) {
     if (n < 17 || r.size() < 17 || r[0] != 0x09 || r[1] != op || r[2] || r[3] || r[4]) return false;
-    unsigned sum = 0;
-    for (int i = 0; i < 17; i++) sum += r[i];
+    const unsigned sum = std::accumulate(r.begin(), r.begin() + 17, 0u);
     if ((sum & 0xFF) != 0x55) return false;
     int size = r[5];
     if (size < 1 || size > 10) return false;

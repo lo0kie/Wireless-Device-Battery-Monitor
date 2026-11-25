@@ -36,9 +36,8 @@ void PollVaxee(PollContext& ctx) {
     // USB device disappears (including moving the cable from receiver to mouse).
     static std::map<std::wstring, DeviceStatus> lastGood;
     for (auto it = lastGood.begin(); it != lastGood.end();) {
-        bool present = false;
-        for (const auto& c : ctx.colls)
-            if (c.path == it->first) { present = true; break; }
+        const bool present = std::any_of(ctx.colls.begin(), ctx.colls.end(),
+            [&](const HidColl& c) { return c.path == it->first; });
         if (present) { ++it; continue; }
         DeviceStatus gone = it->second;
         gone.connected = false;

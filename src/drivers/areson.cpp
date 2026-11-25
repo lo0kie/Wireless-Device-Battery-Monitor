@@ -15,6 +15,7 @@
 // Only the FA07/FA08 product ids are handled: the FA7B/FA7C family reports the level on a
 // different scale, and reporting it here would show a wrong percentage.
 #include "drivers.h"
+#include <numeric>
 
 namespace {
 
@@ -28,8 +29,7 @@ bool QueryPower(HidDev& cmd, HidDev& reply, Power& out) {
     std::vector<BYTE> req(17, 0);
     req[0] = 0x08;  // report id
     req[1] = 0x04;  // GetPower
-    int sum = 0;
-    for (int i = 0; i < 16; i++) sum += req[i];
+    const int sum = std::accumulate(req.begin(), req.begin() + 16, 0);
     req[16] = (BYTE)(0x55 - sum);
     for (int attempt = 0; attempt < 2; attempt++) {
         if (attempt) Sleep(200);
@@ -37,8 +37,7 @@ bool QueryPower(HidDev& cmd, HidDev& reply, Power& out) {
         if (!cmd.SetFeature(req)) return false;  // receiver gone; retrying will not help
         std::vector<BYTE> r;
         if (reply.Read(r, 1800) < 17) continue;  // asleep or out of range
-        unsigned total = 0;
-        for (BYTE b : r) total += b;
+        const unsigned total = std::accumulate(r.begin(), r.end(), 0u);
         if ((total & 0xFF) != 0x55 || r[0] != 0x09 || r[1] != 0x04 || r[2] != 0x00 || r[6] > 10) continue;
         out.percent = Clamp100(r[6] * 10);
         out.charging = r[7] != 0;

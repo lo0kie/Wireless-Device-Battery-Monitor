@@ -14,6 +14,7 @@
 // and is assumed to answer the same query. The matching and the reply checks below are deliberately
 // strict, so a device that answers differently is skipped rather than misreported.
 #include "drivers.h"
+#include <numeric>
 
 namespace {
 
@@ -39,8 +40,7 @@ std::vector<BYTE> BuildQuery() {
     f[3] = kStatusType;
     f[4] = 0x03;
     f[7] = 0x55;
-    unsigned sum = 0;
-    for (size_t i = 3; i < f.size(); ++i) sum += f[i];
+    const unsigned sum = std::accumulate(f.begin() + 3, f.end(), 0u);
     f[1] = (BYTE)(sum & 0xFF);
     f[2] = (BYTE)((sum >> 8) & 0xFF);
     return f;
@@ -134,16 +134,14 @@ std::vector<BYTE> XtrfyQuery(BYTE cmd) {
     std::vector<BYTE> f(kXtrfyLen, 0);
     f[0] = kXtrfyReportId;
     f[1] = cmd;
-    unsigned sum = 0;
-    for (size_t i = 0; i + 1 < f.size(); ++i) sum += f[i];
+    const unsigned sum = std::accumulate(f.begin(), f.end() - 1, 0u);
     f[kXtrfyLen - 1] = (BYTE)(0x55 - sum);
     return f;
 }
 
 bool XtrfyChecksumOk(const std::vector<BYTE>& r) {
     if (r.size() != kXtrfyLen) return false;
-    unsigned sum = 0;
-    for (size_t i = 0; i + 1 < r.size(); ++i) sum += r[i];
+    const unsigned sum = std::accumulate(r.begin(), r.end() - 1, 0u);
     return (BYTE)(0x55 - sum) == r[kXtrfyLen - 1];
 }
 

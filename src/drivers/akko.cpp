@@ -5,6 +5,7 @@
 //   query:  type 0x1A, payload 03 00 00 55 (read-only status request)
 //   reply:  [0] 4, [3] 0x1A, [8] battery percent (0..100), [9] non-zero while charging
 #include "drivers.h"
+#include <numeric>
 
 namespace {
 
@@ -32,8 +33,7 @@ std::vector<BYTE> BuildQuery() {
     f[3] = kStatusType;
     f[4] = 0x03;
     f[7] = 0x55;
-    unsigned sum = 0;
-    for (size_t i = 3; i < f.size(); ++i) sum += f[i];
+    const unsigned sum = std::accumulate(f.begin() + 3, f.end(), 0u);
     f[1] = (BYTE)(sum & 0xFF);
     f[2] = (BYTE)((sum >> 8) & 0xFF);
     return f;

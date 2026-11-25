@@ -21,6 +21,7 @@
 //             was always the same. While the mouse sleeps this answers status=2 with no data.
 // Only these read commands are sent; nothing is written to the mouse configuration.
 #include "drivers.h"
+#include <numeric>
 
 namespace {
 constexpr USHORT kVid = 0x372E;
@@ -44,8 +45,7 @@ bool Query(HidDev& d, BYTE cmd, BYTE sub, std::vector<BYTE>& data) {
     req[2] = 0x50;  // CMD_TYPE
     req[5] = cmd;
     req[6] = sub;
-    unsigned sum = 0;
-    for (size_t i = 1; i < req.size(); ++i) sum += req[i];
+    const unsigned sum = std::accumulate(req.begin() + 1, req.end(), 0u);
     req[1] = static_cast<BYTE>(sum & 0xFF);
     if (!d.SetFeature(req)) return false;
     // PIAO's radio wakes on any feature query; a sleeping mouse needs a few frames before

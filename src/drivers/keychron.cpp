@@ -43,6 +43,7 @@
 // in docs/keychron_keyboard_firmware/q6_ultra_8k.md answers A7 31 [battery %][charging] like the
 // Nape Pro, over the receiver and on the USB cable. Checked on a real Q6 Ultra 8K ANSI (v1.0.4).
 #include "drivers.h"
+#include <numeric>
 
 namespace {
 
@@ -110,8 +111,7 @@ void PollKeychronLinkKeyboard(PollContext& ctx, USHORT vid, USHORT pid) {
 }
 
 void SetChecksum(std::vector<BYTE>& payload) {  // payload = 64 bytes without the report id
-    unsigned sum = 0;
-    for (int i = 0; i < 63; i++) sum += payload[i];
+    const unsigned sum = std::accumulate(payload.begin(), payload.begin() + 63, 0u);
     payload[63] = (BYTE)(0xA1 - sum);
 }
 
@@ -162,10 +162,7 @@ bool RawQuery(HidDev& d, std::initializer_list<BYTE> cmd, std::vector<BYTE>& r) 
         int n = d.Read(r, left);
         if (n < 0) return false;
         if (n < (int)cmd.size() + 2) continue;
-        bool match = true;
-        size_t i = 0;
-        for (BYTE b : cmd) match = match && r[i++] == b;
-        if (match) return true;
+        if (std::equal(cmd.begin(), cmd.end(), r.begin())) return true;
     }
     return false;
 }

@@ -16,18 +16,19 @@ constexpr wchar_t kWindowClass[] = L"WirelessBatteryTextStyleDialog";
 // Control ids. The two buttons use IDOK/IDCANCEL so IsDialogMessage maps Enter and Esc onto them.
 enum : int {
     kIdFont = 100, kIdSize, kIdWeight, kIdIconSize, kIdSpacing, kIdGap, kIdLetterSpacing,
+    kIdDividerGap,
     kIdError = 200,
 };
 
 // Layout in pixels at 96 dpi; every value goes through S() so the dialog scales with the monitor.
-constexpr int kClientW = 468, kClientH = 268;
+constexpr int kClientW = 468, kClientH = 282;
 constexpr int kPad = dlg::kPad, kCol2X = 246, kFieldW = 210;
 
 struct StyleState {
     widget::TextStyle initial;
     widget::TextStyle result;
     HWND font = nullptr, size = nullptr, weight = nullptr, iconSize = nullptr, spacing = nullptr, gap = nullptr;
-    HWND letterSpacing = nullptr;
+    HWND letterSpacing = nullptr, dividerGap = nullptr;
     HWND error = nullptr;
     HFONT uiFont = nullptr;
     bool accepted = false;
@@ -136,13 +137,14 @@ bool Collect(HWND hwnd, widget::TextStyle& chosen) {
     GetWindowTextW(s->font, face, ARRAYSIZE(face));
     const int weightSel = (int)SendMessageW(s->weight, CB_GETCURSEL, 0, 0);
     int size = 0, weight = 0, iconSize = 0;
-    float spacing = 0, gap = 0, letterSpacing = 0;
+    float spacing = 0, gap = 0, letterSpacing = 0, dividerGap = 0;
     weight = weightSel >= 0 ? (int)SendMessageW(s->weight, CB_GETITEMDATA, weightSel, 0) : 400;
     if (!CheckNumber(hwnd, s->size, kMinTextSize, kMaxTextSize, size) ||
         !CheckNumber(hwnd, s->iconSize, kMinIconSize, kMaxIconSize, iconSize) ||
         !CheckDecimal(hwnd, s->spacing, kMinIconGap, kMaxIconGap, spacing) ||
         !CheckDecimal(hwnd, s->gap, kMinItemGap, kMaxItemGap, gap) ||
-        !CheckDecimal(hwnd, s->letterSpacing, kMinLetterSpacing, kMaxLetterSpacing, letterSpacing))
+        !CheckDecimal(hwnd, s->letterSpacing, kMinLetterSpacing, kMaxLetterSpacing, letterSpacing) ||
+        !CheckDecimal(hwnd, s->dividerGap, kMinDividerGap, kMaxDividerGap, dividerGap))
         return false;
     chosen.face = face;
     chosen.size = size;
@@ -151,6 +153,7 @@ bool Collect(HWND hwnd, widget::TextStyle& chosen) {
     chosen.iconGap = spacing;
     chosen.itemGap = gap;
     chosen.letterSpacing = letterSpacing;
+    chosen.dividerGap = dividerGap;
     return true;
 }
 
@@ -210,7 +213,11 @@ void CreateControls(HWND hwnd, StyleState& s) {
     s.letterSpacing = EditBox(hwnd, FmtNum(s.initial.letterSpacing).c_str(), dpi, kCol2X, 176, kFieldW,
                               kIdLetterSpacing, false);
 
-    s.error = Label(hwnd, L"", dpi, kPad, 206, kClientW - kPad * 2);
+    Label(hwnd, T(L"Divider gap (px)"), dpi, kPad, 208, kFieldW);
+    s.dividerGap = EditBox(hwnd, FmtNum(s.initial.dividerGap).c_str(), dpi, kPad, 226, kFieldW,
+                           kIdDividerGap, false);
+
+    s.error = Label(hwnd, L"", dpi, kPad, 256, kClientW - kPad * 2);
 
     s.uiFont = dlg::SystemFont(dpi);
     if (s.uiFont) EnumChildWindows(hwnd, SetFontProc, (LPARAM)s.uiFont);

@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "gamesir_ble_protocol.h"
+#include <algorithm>
 
 namespace {
 
@@ -234,8 +235,8 @@ void PollGameSirBle(PollContext& ctx) {
     if (pads.empty()) return;
     const Pad& pad = pads.front();  // one Cyclone Pro per PC; a second pad would share the dongle id anyway
 
-    bool dongle = false;
-    for (const auto& c : ctx.colls) dongle |= c.vid == kVid && c.pid == kDonglePid;
+    const bool dongle = std::any_of(ctx.colls.begin(), ctx.colls.end(),
+        [](const HidColl& c) { return c.vid == kVid && c.pid == kDonglePid; });
 
     HANDLE first = nullptr;  // the very first read is waited for (app start, --list)
     {

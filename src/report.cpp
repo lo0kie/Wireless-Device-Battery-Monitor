@@ -447,9 +447,11 @@ void OnDeviceChanged() {
     const Candidate* c = Selected();
     SetDlgItemTextW(g_wnd, IDC_MODEL, c ? c->name.c_str() : L"");
     int type = 4;
-    if (c)
-        for (int i = 0; i < 5; i++)
-            if (wcscmp(kTypes[i], c->Type()) == 0) type = i;
+    if (c) {
+        auto it = std::find_if(std::begin(kTypes), std::end(kTypes),
+            [&](const wchar_t* t) { return std::wstring(t) == c->Type(); });
+        if (it != std::end(kTypes)) type = (int)(it - std::begin(kTypes));
+    }
     SendDlgItemMessageW(g_wnd, IDC_TYPE, CB_SETCURSEL, type, 0);
     UpdatePreview();
 }

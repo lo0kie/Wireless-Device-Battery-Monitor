@@ -21,6 +21,7 @@ using ABI::Windows::System::Power::BatteryStatus;
 } } } }
 #include <windows.devices.power.h>
 #include <windows.gaming.input.h>
+#include <algorithm>
 
 namespace {
 
@@ -148,8 +149,9 @@ const XInputApi& LoadXInput() {
 
 void PollXInput(PollContext& ctx) {
     // An Xbox controller on Bluetooth may already be listed with a real percentage.
-    bool btXbox = false;
-    for (auto& s : ctx.out) btXbox |= s.via == L"Bluetooth" && s.name.find(L"Xbox") != std::wstring::npos;
+    const bool btXbox = std::any_of(ctx.out.begin(), ctx.out.end(), [](const DeviceStatus& s) {
+        return s.via == L"Bluetooth" && s.name.find(L"Xbox") != std::wstring::npos;
+    });
     int thirdParty = 0;
     int precise = btXbox ? 0 : PollWgi(ctx, thirdParty);
     // GameSir pads answer XInput's headset query with their own battery ("Full") even with nothing

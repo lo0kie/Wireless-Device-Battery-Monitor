@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "device_aliases.h"
+#include "known_devices.h"
 #include "alert_rules.h"
 #include "devices.h"
 #include "battery_history.h"
@@ -61,7 +62,7 @@ constexpr UINT ALERT_ICON_ID = 2;
 
 enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
-    ID_BRAND_COLORS, ID_STACKED, ID_SHOW_DISCONNECTED, ID_RECORD_HISTORY, ID_DIM_SLEEPING,
+    ID_BRAND_COLORS, ID_STACKED, ID_DEVICE_DIVIDER, ID_SHOW_DISCONNECTED, ID_RECORD_HISTORY, ID_DIM_SLEEPING,
     ID_TRAY_WHEN_EMPTY, ID_MAKE_ROOM, ID_FAR_LEFT, ID_PERCENT_SIGN, ID_RING_STYLE, ID_BEFORE_APPS, ID_CONNECTION_ICONS, ID_KEEP_MOUSE_LAST_KNOWN,
     ID_PLACE_AUTO, ID_PLACE_TOP, ID_PLACE_TRAY, ID_PLACE_BOTTOM, ID_TEXT_STYLE,  // "Position on a vertical taskbar"
     ID_POSITION_FIRST = 700,  // "Position on the taskbar": ID_POSITION_FIRST + 0..5, then the custom value
@@ -82,6 +83,11 @@ const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t* kRunValue = L"WirelessBattery";
 
 const wchar_t* kSettingsKey = L"Software\\WirelessBattery";
+
+// `--demo`: one sample device of every brand instead of real ones, for screenshots and for checking the
+// brand colors without owning the hardware. Keys, vendor ids and names are mixed on purpose, so every way
+// of recognising a brand gets used.
+bool g_demo = false;
 
 HINSTANCE g_inst;
 HWND g_hwnd;
@@ -104,6 +110,7 @@ bool g_showPercentSign = true;  // include '%' in taskbar battery labels (menu o
 widget::TextStyle g_textStyle;  // font, size and spacing of the taskbar strip (menu option)
 bool g_ringStyle = false;  // device icon inside a battery ring (menu option, PR #110)
 bool g_connectionIcons = false;  // wireless mark for 2.4 GHz devices (menu option, PR #2277)
+bool g_deviceDivider = false;    // thin line between neighbouring devices on the taskbar (menu option)
 bool g_makeRoom = true;      // step past other apps' taskbar widgets (menu option)
 // "Position on the taskbar": distance from the notification area in DPI-independent pixels. Stored as
 // the TaskbarOffset value the widget has always read, so a value set by hand keeps working.
@@ -127,6 +134,9 @@ struct TrayEntry {
     HICON icon = nullptr;
 };
 std::map<std::wstring, TrayEntry> g_entries;
+// Devices seen in an earlier session. Restored as offline placeholders at startup and updated as
+// polls answer, so an unplugged device stays in the menu after a restart (see "Show disconnected").
+known_devices::Map g_knownDevices;
 std::map<std::wstring, bool> g_alertLatches;  // survive transient removal of a device
 bool g_alertIconAdded = false;  // short-lived tray icon for widget-mode notifications
 bool g_placeholder = false;
@@ -232,6 +242,25 @@ void SaveOrder() {
     for (const auto& k : g_order) { multi += k; multi.push_back(L'\0'); }
     multi.push_back(L'\0');
     RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"DeviceOrder", REG_MULTI_SZ, multi.data(), (DWORD)(multi.size() * sizeof(wchar_t)));
+}
+
+// Restore last session's devices as offline placeholders. Without a fresh poll there is no battery
+// level, so they only appear when "Show disconnected devices" is on -- but their names and kinds are
+// back immediately, and a later poll that answers simply overwrites them.
+void RestoreKnownDevices() {
+    if (g_demo) return;  // demo data must never enter the real device archive
+    g_knownDevices = known_devices::Load(kSettingsKey);
+    for (const auto& [key, d] : g_knownDevices) {
+        TrayEntry& e = g_entries[key];
+        e.uid = StableId(key);
+        e.st.key = key;
+        e.st.name = d.name;
+        e.st.via = d.via;
+        e.st.kind = d.kind;
+        e.st.connected = false;
+        e.st.percent = -1;
+        e.lastPct = -1;
+    }
 }
 
 bool IsEntryHidden(const TrayEntry& e) {
@@ -396,6 +425,8 @@ widget::TextStyle LoadTextStyle() {
     s.iconSize = LoadIntSetting(L"TextIconSizePx", s.iconSize, kMinIconSize, kMaxIconSize);
     s.iconGap = LoadPxSetting(L"TextIconGapPx10", L"TextIconGapPx", s.iconGap, kMinIconGap, kMaxIconGap);
     s.itemGap = LoadPxSetting(L"TextItemGapPx10", L"TextItemGapPx", s.itemGap, kMinItemGap, kMaxItemGap);
+    s.dividerGap = LoadPxSetting(L"TextDividerGapPx10", L"TextDividerGapPx", s.dividerGap,
+                                 kMinDividerGap, kMaxDividerGap);
     s.letterSpacing = LoadPxSetting(L"TextLetterSpacingPx10", L"TextLetterSpacingPx", s.letterSpacing,
                                     kMinLetterSpacing, kMaxLetterSpacing);
     return s;
@@ -403,6 +434,7 @@ widget::TextStyle LoadTextStyle() {
 bool LoadRingStyle() { return LoadBoolSetting(L"RingStyle", false); }
 void SaveRingStyle(bool on) { SaveBoolSetting(L"RingStyle", on); }
 bool LoadConnectionIcons() { return LoadBoolSetting(L"ConnectionIcons", false); }
+bool LoadDeviceDivider() { return LoadBoolSetting(L"DeviceDivider", false); }
 void SaveConnectionIcons(bool on) { SaveBoolSetting(L"ConnectionIcons", on); }
 widget::VerticalPlace LoadVerticalPlace() {
     DWORD v = 0, sz = sizeof(v);
@@ -668,8 +700,8 @@ void UpdatePlaceholder() {
         if (g_placeholder) { TrayDelete(PLACEHOLDER_ID); g_placeholder = false; }
         return;
     }
-    bool any = false;
-    for (auto& [k, e] : g_entries) any |= e.added;
+    const bool any = std::any_of(g_entries.begin(), g_entries.end(),
+        [](const auto& entry) { return entry.second.added; });
     if (!any && !g_placeholder) {
         if (!g_placeholderIcon) g_placeholderIcon = RenderIcon(L"-", -1, Foreground(), Foreground(), true);
         g_placeholder = TrayShow(false, PLACEHOLDER_ID, g_placeholderIcon,
@@ -740,6 +772,20 @@ std::vector<TrayEntry*> OrderedEntries(bool shownOnly) {
     return list;
 }
 
+// The `via` string is driver-supplied; classify its common forms so the small mark can show how a
+// device is connected. Unknown kinds stay unmarked instead of guessing.
+LinkKind LinkFor(const std::wstring& via) {
+    if (via.rfind(L"2.4 GHz", 0) == 0 || via.find(L"receiver") != std::wstring::npos ||
+        via.find(L"dongle") != std::wstring::npos || via.find(L"base station") != std::wstring::npos ||
+        via.find(L"Xbox Wireless") != std::wstring::npos ||
+        via.find(L"PlayStation Link") != std::wstring::npos ||
+        via.find(L"Phone Link") != std::wstring::npos)
+        return LinkKind::Wireless;
+    if (via.find(L"Bluetooth") != std::wstring::npos) return LinkKind::Bluetooth;
+    if (via.find(L"USB") != std::wstring::npos || via == L"HID") return LinkKind::Wired;
+    return LinkKind::None;
+}
+
 void UpdateWidget() {
     if (!g_useWidget || !widget::Alive()) return;  // not alive while the strip is swapped for the tray
     std::vector<TrayEntry*> list = OrderedEntries(true);
@@ -754,14 +800,14 @@ void UpdateWidget() {
         it.kind = e->st.kind;
         bool offline = !e->st.connected;
         it.percent = offline ? -1 : (e->st.percent >= 0 ? e->st.percent : e->lastPct);
-        if (offline) it.text = L"\u00D7";  // clear status, not a stale percentage
+        if (offline) it.text = L"--%";  // clear status, not a stale percentage
         else if (e->st.percent >= 0) it.text = T(e->st.levelText);
         it.charging = !offline && !e->st.asleep && e->st.charging;
         it.full = !offline && (e->st.full || (e->st.charging && it.percent >= 100));
         it.dim = ShouldDim(e->st);
         it.low = !offline && !it.charging && it.percent >= 0 && it.percent <= LOW_BATTERY;
         it.bluetooth = e->st.via == L"Bluetooth";
-        it.wirelessLink = !offline && e->st.via.rfind(L"2.4 GHz", 0) == 0;
+        it.link = LinkFor(e->st.via);  // keep the mark even when offline, so a dropped device still says how it was connected
         it.label = labels[items.size()];
         it.accent = AccentFor(e->st);
         items.push_back(it);
@@ -802,6 +848,13 @@ void SmoothCharging(DeviceStatus& s) {
 
 void OnResults(std::vector<DeviceStatus>& results) {
     for (auto& s : results) SmoothCharging(s);
+    // Remember each answering device's identity for the next session. Write once per poll and only
+    // if something changed, so the archive does not churn the registry every minute.
+    bool archiveChanged = false;
+    for (const auto& s : results)
+        if (!g_demo && known_devices::Remember(g_knownDevices, s)) archiveChanged = true;
+    if (archiveChanged) known_devices::Save(kSettingsKey, g_knownDevices);
+
     std::map<std::wstring, bool> seen;
     for (auto& s : results) {
         auto& e = g_entries[s.key];
@@ -847,9 +900,18 @@ void OnResults(std::vector<DeviceStatus>& results) {
             ApplyEntry(e);
         }
         if (!seen.count(it->first) && !inGrace) {
-            if (it->second.added) TrayDelete(it->second.uid);
-            if (it->second.icon) DestroyIcon(it->second.icon);
-            it = g_entries.erase(it);
+            // A device that stops answering drops out of every driver's results, which used to erase
+            // its entry. Keep it instead, marked explicitly offline: "Show disconnected devices" can
+            // then bring it back as a dimmed cross, and a device that answers again just overwrites
+            // this state on the next poll. Entries are still bounded by the keys ever seen on this PC.
+            TrayEntry& e = it->second;
+            if (e.st.connected) {
+                e.st.connected = false;   // drives both the dimmed icon and the "off" tooltip
+                e.st.asleep = false;      // it is gone, not sleeping
+                e.st.percent = -1;        // never show the last reading as a live one
+                ApplyEntry(e);            // remove its tray icon unless the opt-in is on
+            }
+            ++it;
         } else {
             ++it;
         }
@@ -985,6 +1047,12 @@ void SetConnectionIcons(bool on) {
     widget::SetConnectionIcons(on);
 }
 
+void SetDeviceDivider(bool on) {
+    g_deviceDivider = on;
+    SaveBoolSetting(L"DeviceDivider", on);
+    widget::SetDeviceDivider(on);
+}
+
 void SetRingStyle(bool on) {
     g_ringStyle = on;
     SaveRingStyle(on);
@@ -1005,6 +1073,7 @@ void ApplyTextStyle(const widget::TextStyle& style) {
     SaveIntSetting(L"TextIconSizePx", style.iconSize);
     SavePxSetting(L"TextIconGapPx10", L"TextIconGapPx", style.iconGap);
     SavePxSetting(L"TextItemGapPx10", L"TextItemGapPx", style.itemGap);
+    SavePxSetting(L"TextDividerGapPx10", L"TextDividerGapPx", style.dividerGap);
     SavePxSetting(L"TextLetterSpacingPx10", L"TextLetterSpacingPx", style.letterSpacing);
     widget::SetTextStyle(style);
 }
@@ -1085,17 +1154,23 @@ void RenameDevice(const std::wstring& key) {
     auto it = g_entries.find(key);
     if (it == g_entries.end()) return;
     const std::wstring originalName = it->second.st.name;
+    // Shared by Save and the dialog's Apply button: write the alias and refresh the display.
+    auto applyName = [&](const std::wstring& chosen) {
+        if (chosen == originalName) g_aliases.erase(key);
+        else if (g_aliases.count(key) || g_aliases.size() < aliases::kMaxAliases) g_aliases[key] = chosen;
+        else return;  // bounded registry value; don't silently drop other users' names
+        SaveAliases();
+        // The modal editor pumps the message queue, so polling may remove the entry.
+        // Resolve the iterator again rather than dereferencing a potentially stale one.
+        auto cur = g_entries.find(key);
+        if (cur != g_entries.end()) ApplyEntry(cur->second);
+        UpdateWidget();
+    };
     std::wstring chosen;
-    if (!PromptDeviceName(g_hwnd, DisplayName(it->second), chosen)) return;
-    if (chosen == originalName) g_aliases.erase(key);
-    else if (g_aliases.count(key) || g_aliases.size() < aliases::kMaxAliases) g_aliases[key] = chosen;
-    else return;  // bounded registry value; don't silently drop other users' names
-    SaveAliases();
-    // The modal editor pumps the message queue, so polling may remove the entry.
-    // Resolve the iterator again rather than dereferencing a potentially stale one.
-    it = g_entries.find(key);
-    if (it != g_entries.end()) ApplyEntry(it->second);
-    UpdateWidget();
+    if (!PromptDeviceName(g_hwnd, DisplayName(it->second), chosen,
+                          [&](const std::wstring& n) { applyName(n); }))
+        return;
+    applyName(chosen);
 }
 
 void ResetDeviceName(const std::wstring& key) {
@@ -1134,9 +1209,17 @@ void MoveEntry(const std::wstring& key, int dir) {
     UpdateWidget();
 }
 
-void ShowMenu() {
+// `settings=true` opens the right-click menu (application settings); false is the left-click menu
+// (devices and their actions). Both are built from the same item list so command ids and the keys /
+// languages / monitors tables stay in sync; only the top-level rows offered differ.
+void ShowMenu(bool settings) {
     using Item = popup_menu::Item;
     auto raw = [](std::wstring text, UINT_PTR id) {
+        // Menu items open a dialog or submenu right away, so a trailing "..." adds no information.
+        // Strip it from the shown text; the i18n key (with "...") stays intact so translations work.
+        while (!text.empty() && (text.back() == L' ' || text.back() == L'\t')) text.pop_back();
+        if (text.size() >= 3 && text.compare(text.size() - 3, 3, L"...") == 0)
+            text.resize(text.size() - 3);
         Item it;
         it.text = std::move(text);
         it.id = id;
@@ -1188,15 +1271,18 @@ void ShowMenu() {
         int selectedThreshold = alerts::OverrideFor(g_alertOverrides, k);
         std::vector<Item> alertItems;
         for (int i = 0; i < alerts::kThresholdCount; ++i) {
-            int level = alerts::kThresholds[i];
-            Item th = raw(std::to_wstring(level) + L"%", base + DEV_ALERT_FIRST + i);
-            th.checked = selectedThreshold == level;
+            const int level = alerts::kThresholds[i];
+            // The default level is one of the choices: its label carries "(default)" and picking it
+            // clears the per-device override, exactly like the old separate "Use default" row did.
+            const bool isDefault = level == alerts::kDefaultThreshold;
+            const std::wstring label = isDefault
+                ? TF(L"{level}% (default)", { { L"level", std::to_wstring(level) } })
+                : std::to_wstring(level) + L"%";
+            Item th = raw(label, base + DEV_ALERT_FIRST + i);
+            th.checked = selectedThreshold == level || (isDefault && selectedThreshold == alerts::kUseDefault);
             alertItems.push_back(dot(th));
         }
         alertItems.push_back(sep());
-        Item useDefault = raw(T(L"Use default (15%)"), base + DEV_ALERT_DEFAULT);
-        useDefault.checked = selectedThreshold == alerts::kUseDefault;
-        alertItems.push_back(dot(useDefault));
         Item alertsOff = raw(T(L"Disable notifications"), base + DEV_ALERT_OFF);
         alertsOff.checked = selectedThreshold == alerts::kDisabled;
         alertItems.push_back(dot(alertsOff));
@@ -1208,7 +1294,8 @@ void ShowMenu() {
 
         sub.push_back(history);
 
-        Item entry = raw(DisplayName(*e) + L"  -  " + StatusText(*e), 0);
+        Item entry = raw(DisplayName(*e), 0);
+        entry.rightText = StatusText(*e);
 
         entry.children = std::move(sub);
         top.push_back(std::move(entry));
@@ -1263,7 +1350,7 @@ void ShowMenu() {
     {
         // Taskbar widget or tray icons: one choice, so it lives one level down like the other groups.
         std::vector<Item> modeSub;
-        Item widgetMode = raw(T(L"Show on the taskbar (icon + percentage)"), ID_MODE_WIDGET);
+        Item widgetMode = raw(T(L"Show on the taskbar"), ID_MODE_WIDGET);
         widgetMode.checked = g_wantWidget;
         modeSub.push_back(dot(widgetMode));
         Item trayMode = raw(T(L"Show as tray icons"), ID_MODE_TRAY);
@@ -1275,29 +1362,33 @@ void ShowMenu() {
         modeSub.push_back(empty);
         // How that widget looks: colour, shape, background and unit, in the same submenu.
         modeSub.push_back(sep());
-        Item stacked = raw(T(L"Icons above percentages (narrower)"), ID_STACKED);
+        Item stacked = raw(T(L"Icons above percentages"), ID_STACKED);
         stacked.checked = g_stacked;
         stacked.disabled = !g_wantWidget;
         modeSub.push_back(stacked);
-        Item bg = raw(T(L"Background behind taskbar text (for transparent taskbars)"), ID_WIDGET_BACKGROUND);
+        Item bg = raw(T(L"Background behind taskbar text"), ID_WIDGET_BACKGROUND);
         bg.checked = g_widgetBackground;
         bg.disabled = !g_wantWidget;
         modeSub.push_back(bg);
-        Item ring = raw(T(L"Ring style (icon inside a battery ring)"), ID_RING_STYLE);
+        Item ring = raw(T(L"Ring style"), ID_RING_STYLE);
         ring.checked = g_ringStyle;
         ring.disabled = !g_wantWidget;
         modeSub.push_back(ring);
-        Item sign = raw(T(L"Show percent sign (%)"), ID_PERCENT_SIGN);
+        Item sign = raw(T(L"Show percent sign"), ID_PERCENT_SIGN);
         sign.checked = g_showPercentSign;
         sign.disabled = !g_wantWidget;
         modeSub.push_back(sign);
-        Item brand = raw(T(L"Brand colors (Razer green, Logitech blue, ...)"), ID_BRAND_COLORS);
+        Item brand = raw(T(L"Brand colors"), ID_BRAND_COLORS);
         brand.checked = g_brandColors;
         modeSub.push_back(brand);
-        Item link = raw(T(L"Mark devices on a 2.4 GHz receiver"), ID_CONNECTION_ICONS);
+        Item link = raw(T(L"Mark connection type"), ID_CONNECTION_ICONS);
         link.checked = g_connectionIcons;
         link.disabled = !g_wantWidget;
         modeSub.push_back(link);
+        Item divider = raw(T(L"Separator between devices"), ID_DEVICE_DIVIDER);
+        divider.checked = g_deviceDivider;
+        divider.disabled = !g_wantWidget;
+        modeSub.push_back(divider);
         modeSub.push_back(sep());
         modeSub.push_back(raw(T(L"Text style..."), ID_TEXT_STYLE));  // also styles the tray digits
         Item mode = raw(T(L"Display style"), 0);
@@ -1477,6 +1568,28 @@ void ShowMenu() {
         top.push_back(exit);
     }
 
+    // Split into the two menus. Device rows and Refresh belong to the left-click menu; everything
+    // that configures the application belongs to the right-click menu. Exit and the empty-list
+    // placeholder are useful in both. Item ids are chosen so a row's group can be recognised without
+    // duplicating the build: device rows are the only parent rows with a rightText (their status).
+    {
+        std::vector<Item> filtered;
+        for (const Item& it : top) {
+            const bool isSep = it.kind == Item::Kind::Separator;
+            const bool isDevice = it.id == 0 && !it.rightText.empty() && !it.children.empty();
+            const bool isBoth = isSep || it.id == ID_EXIT || (it.id == 0 && it.disabled && it.children.empty() && it.rightText.empty());
+            const bool isLeft = isDevice || it.id == ID_REFRESH;
+            bool keep = isBoth || (settings ? !isLeft : isLeft);
+            if (keep) {
+                // Drop a separator that opens the list or follows another one.
+                bool prevSep = !filtered.empty() && filtered.back().kind == Item::Kind::Separator;
+                if (!(isSep && (filtered.empty() || prevSep))) filtered.push_back(it);
+            }
+        }
+        while (!filtered.empty() && filtered.back().kind == Item::Kind::Separator) filtered.pop_back();
+        top = std::move(filtered);
+    }
+
     POINT pt;
     GetCursorPos(&pt);
     SetForegroundWindow(g_hwnd);
@@ -1524,6 +1637,7 @@ void ShowMenu() {
         }
         case ID_RING_STYLE: SetRingStyle(!g_ringStyle); break;
         case ID_CONNECTION_ICONS: SetConnectionIcons(!g_connectionIcons); break;
+        case ID_DEVICE_DIVIDER: SetDeviceDivider(!g_deviceDivider); break;
         case ID_MAKE_ROOM: SetMakeRoom(!g_makeRoom); break;
         case ID_PLACE_AUTO: SetWidgetPlace(widget::VerticalPlace::Auto); break;
         case ID_PLACE_TOP: SetWidgetPlace(widget::VerticalPlace::Top); break;
@@ -1572,7 +1686,6 @@ void ShowMenu() {
                     case DEV_RIGHT:  MoveEntry(key, +1); break;
                     case DEV_RENAME: RenameDevice(key); break;
                     case DEV_RESET_NAME: ResetDeviceName(key); break;
-                    case DEV_ALERT_DEFAULT: SetAlertOverride(key, alerts::kUseDefault); break;
                     case DEV_ALERT_OFF: SetAlertOverride(key, alerts::kDisabled); break;
                     case DEV_HISTORY: {
                         auto it = g_entries.find(key);
@@ -1582,8 +1695,12 @@ void ShowMenu() {
                     }
                     default: {
                         UINT slot = (cmd - ID_DEVICE_FIRST) % DEV_STRIDE;
-                        if (slot >= DEV_ALERT_FIRST && slot < DEV_ALERT_FIRST + alerts::kThresholdCount)
-                            SetAlertOverride(key, alerts::kThresholds[slot - DEV_ALERT_FIRST]);
+                        if (slot >= DEV_ALERT_FIRST && slot < DEV_ALERT_FIRST + alerts::kThresholdCount) {
+                            const int level = alerts::kThresholds[slot - DEV_ALERT_FIRST];
+                            // Selecting the default level removes the override, so a future change of
+                            // the app-wide default is still picked up for this device.
+                            SetAlertOverride(key, level == alerts::kDefaultThreshold ? alerts::kUseDefault : level);
+                        }
                         break;
                     }
                 }
@@ -1592,11 +1709,6 @@ void ShowMenu() {
 }
 
 // ---- worker thread ----------------------------------------------------------------------------
-
-// `--demo`: one sample device of every brand instead of real ones, for screenshots and for checking the
-// brand colors without owning the hardware. Keys, vendor ids and names are mixed on purpose, so every way
-// of recognising a brand gets used.
-bool g_demo = false;
 
 std::vector<DeviceStatus> DemoDevices() {
     auto make = [](const wchar_t* key, const wchar_t* name, DeviceKind kind, int pct, unsigned short vid, bool charging) {
@@ -1757,13 +1869,13 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_TRAY:
             switch (LOWORD(lp)) {
-                case WM_CONTEXTMENU:
-                case NIN_SELECT:
-                case NIN_KEYSELECT: ShowMenu(); break;
+                case WM_CONTEXTMENU: ShowMenu(true); break;   // right click: settings
+                case NIN_SELECT:                               // left click: devices
+                case NIN_KEYSELECT: ShowMenu(false); break;    // keyboard: same as left
             }
             return 0;
         case WM_WIDGET_CLICK:
-            ShowMenu();
+            ShowMenu(wp != 0);  // widget posts 1 for right click, 0 for left
             return 0;
         case WM_ENDSESSION:  // sign-out / shutdown / installer restart manager
             if (wp) DestroyWindow(h);
@@ -2040,6 +2152,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     widget::SetRingStyle(g_ringStyle);
     g_connectionIcons = LoadConnectionIcons();
     widget::SetConnectionIcons(g_connectionIcons);
+    g_deviceDivider = LoadDeviceDivider();
+    widget::SetDeviceDivider(g_deviceDivider);
     g_verticalPlace = LoadVerticalPlace();
     widget::SetVerticalPlace(g_verticalPlace);
     widget::SetFarLeft(g_farLeft);
@@ -2052,6 +2166,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     LoadHidden();
     LoadOrder();
     LoadAliases();
+    RestoreKnownDevices();
     LoadAlertThresholds();
     battery_history::Initialize(g_demo);
     Reconcile();

@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <numeric>
 
 namespace {
 
@@ -30,8 +31,7 @@ std::vector<BYTE> MakePacket(BYTE cmd) {
     std::vector<BYTE> p(kPacketLen, 0);
     p[0] = kReportId;
     p[1] = cmd;
-    unsigned sum = 0;
-    for (size_t i = 0; i < kPacketLen - 1; i++) sum += p[i];
+    const unsigned sum = std::accumulate(p.begin(), p.end() - 1, 0u);
     p[16] = (BYTE)(0x55 - sum);
     return p;
 }
@@ -46,8 +46,7 @@ struct BatteryReply {
 // the buffer varies, so accept the command byte at index 0 or 1. The two offsets under
 // cmd 0 cover the WebHID layouts documented by the project we took the protocol from.
 bool ParseBattery(const std::vector<BYTE>& r, BatteryReply& out) {
-    unsigned sum = 0;
-    for (size_t i = 0; i < r.size() && i < kPacketLen; i++) sum += r[i];
+    const unsigned sum = std::accumulate(r.begin(), r.begin() + std::min(r.size(), kPacketLen), 0u);
     bool chk = r.size() >= kPacketLen && (sum & 0xFF) == 0x55;
 
     auto plausible = [&](size_t power, size_t charge) {

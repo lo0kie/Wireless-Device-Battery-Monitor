@@ -16,6 +16,7 @@ struct Item {
     enum class Kind { Normal, Header, Separator };
     Kind kind = Kind::Normal;
     std::wstring text;
+    std::wstring rightText;    // secondary value shown at the far right (e.g. a battery level)
     UINT_PTR id = 0;           // command returned by Show() when this item is chosen
     bool checked = false;      // check mark at the right
     bool radio = false;        // dot at the right (one of a group)
@@ -28,6 +29,8 @@ struct Options {
     bool rtl = false;         // lay the menu out from the right (Hebrew, Arabic)
     bool hasExclude = false;  // keep the menu out of `exclude` (the taskbar it was opened from)
     RECT exclude{};
+    int maxHeight = 400;      // cap the panel at this many 96-dpi pixels; taller menus scroll.
+                              // 0 disables the cap (only the screen work area limits the menu).
 };
 
 // Shows the menu at a screen point. Returns false only when nothing could be shown at all;

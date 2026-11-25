@@ -11,6 +11,7 @@ constexpr int kMinIconSize = 10, kMaxIconSize = 28;
 // Gaps are fractional (one decimal is enough), so they are floats rather than ints.
 constexpr float kMinIconGap = 0.0f, kMaxIconGap = 24.0f;
 constexpr float kMinItemGap = 2.0f, kMaxItemGap = 60.0f;
+constexpr float kMinDividerGap = 0.0f, kMaxDividerGap = 30.0f;
 constexpr float kMinLetterSpacing = -2.0f, kMaxLetterSpacing = 12.0f;
 
 // Native, modal Win32 editor for the taskbar strip's font, size and spacing. Returns false if cancelled.

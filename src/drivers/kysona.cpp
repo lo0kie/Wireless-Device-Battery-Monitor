@@ -26,6 +26,7 @@
 #include <utility>
 #include <map>
 #include <set>
+#include <numeric>
 
 namespace {
 
@@ -81,8 +82,7 @@ bool IsCable(USHORT vid, USHORT pid) {
 }
 
 BYTE Checksum(const BYTE* b) {
-    unsigned sum = 0;
-    for (int i = 0; i < 16; i++) sum += b[i];
+    const unsigned sum = std::accumulate(b, b + 16, 0u);
     return (BYTE)(0x55 - sum);
 }
 
@@ -193,8 +193,8 @@ void PollKysona(PollContext& ctx) {
                 s.via = IsCable(vid, pid) ? L"USB cable" : L"2.4 GHz receiver";
                 s.graceSec = 1800;
                 // A mouse plugged in for charging can show up twice (cable + dongle); keep one.
-                bool dup = false;
-                for (auto& n : seenNames) dup |= n == s.name;
+                const bool dup = std::any_of(seenNames.begin(), seenNames.end(),
+                    [&](const std::wstring& n) { return n == s.name; });
                 if (dup) {
                     ctx.Claim(vid, pid);
                     for (auto& o : ctx.out)

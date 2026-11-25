@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Cuts the embedded Material Icons font down to the glyphs the app actually uses.
 
-The upstream font carries ~2100 glyphs; BatteryHub draws 36 of them. Embedding the whole file costs
+The upstream font carries ~2100 glyphs; BatteryHub draws 37 of them. Embedding the whole file costs
 about 330 KB in the executable, so the font that goes into the resource is a subset of it.
 
 The codepoints are read from the kMaterial table in src/icon_font.cpp, which is the single place that

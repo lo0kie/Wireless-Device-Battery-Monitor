@@ -3,6 +3,7 @@
 #include "drivers.h"
 
 #include <algorithm>
+#include <numeric>
 
 namespace {
 constexpr USHORT kVid = 0x248A;
@@ -105,8 +106,7 @@ constexpr BYTE kNrfSum = 0xA1;
 constexpr ULONGLONG kNrfTimeoutMs = 600;
 
 BYTE NrfChecksum(const std::vector<BYTE>& frame) {
-    unsigned sum = 0;
-    for (size_t i = 0; i + 1 < kNrfFrame; ++i) sum += frame[i];
+    const unsigned sum = std::accumulate(frame.begin(), frame.end() - 1, 0u);
     return static_cast<BYTE>((kNrfSum - sum) & 0xFF);
 }
 

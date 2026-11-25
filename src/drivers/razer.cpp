@@ -169,9 +169,8 @@ void PollRazer(PollContext& ctx) {
     struct LastReading { std::wstring path; DeviceStatus status; };
     static std::map<USHORT, LastReading> lastGood;
     for (auto it = lastGood.begin(); it != lastGood.end();) {
-        bool present = false;
-        for (const auto& c : ctx.colls)
-            if (c.path == it->second.path) { present = true; break; }
+        const bool present = std::any_of(ctx.colls.begin(), ctx.colls.end(),
+            [&](const HidColl& c) { return c.path == it->second.path; });
         if (present) { ++it; continue; }
         // A removed receiver is different from a mouse sleeping behind it.
         DeviceStatus gone = it->second.status;

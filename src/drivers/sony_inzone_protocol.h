@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <numeric>
 
 namespace SonyHci {
 
@@ -39,8 +40,7 @@ struct Event {
 inline std::vector<std::uint8_t> BatteryGet(std::uint16_t tid) {
     std::vector<std::uint8_t> p = { 0x01, 0x00, 0xFC, 8, 0x96, 0xC3, 0x41, kBatteryInfo, kGet,
                                     (std::uint8_t)tid, (std::uint8_t)(tid >> 8), 0 };
-    unsigned sum = 0;
-    for (std::size_t i = 4; i < p.size() - 1; i++) sum += p[i];
+    const unsigned sum = std::accumulate(p.begin() + 4, p.end() - 1, 0u);
     p.back() = (std::uint8_t)sum;
     return p;
 }
@@ -51,8 +51,7 @@ inline bool ParseEvent(const std::uint8_t* f, std::size_t n, Event& e) {
     if (n < 12) return false;
     if (f[0] != 0x04 || f[1] != 0xFF || f[3] != 0x00 || f[4] != 0x96 || f[5] != 0xC3) return false;
     if ((f[6] >> 4) != 0x1) return false;  // must be addressed to the PC
-    unsigned sum = 0;
-    for (std::size_t i = 3; i < n - 1; i++) sum += f[i];
+    const unsigned sum = std::accumulate(f + 3, f + n - 1, 0u);
     if ((std::uint8_t)sum != f[n - 1]) return false;
     e.id = f[7];
     e.type = f[8];

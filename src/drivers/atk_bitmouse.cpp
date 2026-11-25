@@ -23,6 +23,7 @@
 // productId 4472 (0x1178), usagePage 0xFF10 usage 1, "ATK 8K Nano Dongle", and reads battery and link state
 // with GetConfigData (0x82) sent as feature report 0, the reply matched on its first byte.
 #include "drivers.h"
+#include <numeric>
 
 namespace {
 
@@ -44,8 +45,7 @@ int Query(HidDev& d, BYTE cmd, BitmouseLink link = BitmouseLink::NearLink) {
     req[5] = link == BitmouseLink::ZeroCable ? 0x00 : 0x01;
     req[6] = cmd;
     req[7] = 0x01;  // expected reply length
-    unsigned sum = 0;
-    for (size_t i = 2; i < req.size(); i++) sum += req[i];
+    const unsigned sum = std::accumulate(req.begin() + 2, req.end(), 0u);
     req[1] = zero ? 0x7D : (BYTE)(sum & 0xFF);
     d.Flush();
     ULONGLONG end = GetTickCount64() + 500;

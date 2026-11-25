@@ -17,6 +17,7 @@
 // Charging status is not implemented.
 
 #include "drivers.h"
+#include <numeric>
 
 namespace
 {
@@ -42,9 +43,7 @@ namespace
 
     USHORT Checksum(const std::vector<BYTE> &data, size_t count)
     {
-        unsigned sum = 0;
-        for (size_t i = 0; i < count; ++i)
-            sum += data[i];
+        const unsigned sum = std::accumulate(data.begin(), data.begin() + count, 0u);
         return static_cast<USHORT>((0x10000u - (sum & 0xFFFFu)) & 0xFFFFu);
     }
 

@@ -8,6 +8,9 @@
 #include "brands.h"
 #include "devices.h"
 
+// Which small mark to draw after the level when "mark connection type" is on.
+enum class LinkKind { None, Wireless, Bluetooth, Wired };
+
 struct WidgetItem {
     DeviceKind kind = DeviceKind::Other;
     int  percent  = -1;     // -1 = unknown
@@ -17,7 +20,7 @@ struct WidgetItem {
     bool dim      = false;  // asleep / stale value
     bool low      = false;
     bool bluetooth = false;  // picks the Bluetooth icon when the device type is unknown
-    bool wirelessLink = false;  // on a 2.4 GHz receiver: small wireless mark after the level (opt-in, PR #2277)
+    LinkKind link = LinkKind::None;  // small mark after the level showing how it is connected (opt-in)
     std::wstring label;      // tiny caption on the icon; set only when two devices of one kind are shown
     Accent accent  = Accent::None;  // brand color for the icon, its glow and the level bar
 };
@@ -32,6 +35,7 @@ struct TextStyle {
     int iconSize = 16;        // device icon height, 10..28 px (independent of text size)
     float iconGap = 5;        // space between a device icon and its percentage text, 0..24 px
     float itemGap = 14;       // space between devices, 2..60 px
+    float dividerGap = 6;     // separator's padding on each side (left/right, or top/bottom), 0..30 px
     float letterSpacing = 0;  // extra space between characters of the percentage text, -2..12 px
     // The three gaps are fractional: at 150% DPI a 0.5 px step is 0.75 device pixels, which is the
     // difference between text that breathes and text that does not. They are rounded when drawn.
@@ -53,8 +57,11 @@ void SetStacked(bool on);
 void SetShowPercentSign(bool on);
 // Device icon inside a ring that fills with the charge, instead of icon + percentage (kept across Create/Destroy).
 void SetRingStyle(bool on);
-// Small wireless mark after the level of devices on a 2.4 GHz receiver (kept across Create/Destroy).
+// Small mark after the level showing the connection type -- wireless, Bluetooth or wired (kept
+// across Create/Destroy).
 void SetConnectionIcons(bool on);
+// Draw a thin separator between neighbouring devices on the taskbar (kept across Create/Destroy).
+void SetDeviceDivider(bool on);
 // Steps past other apps' widgets in the taskbar (e.g. a network graph or a countdown) that sit where the
 // strip would go, so both stay readable (kept across Create/Destroy).
 void SetMakeRoom(bool on);

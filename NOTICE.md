@@ -20,7 +20,7 @@ Changes made on 2026-11-25, relative to upstream commit `9c632fd` ("Merge PR #27
 - New *Text style* editor (font, size, weight, icon size and spacing), stored in the registry.
 - The small dialogs now share one shell built from stock Win32 controls, the system caption and the
   system message font.
-- The embedded Material Icons font is subset to the 36 glyphs the app uses
+- The embedded Material Icons font is subset to the 37 glyphs the app uses
   (`scripts/subset-icon-font.py`), see *Third-party notices* below.
 - `Makefile`/`build.bat` build in parallel with real header dependencies.
 - The update check points at this repository instead of upstream.

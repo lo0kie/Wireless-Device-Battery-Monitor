@@ -19,6 +19,7 @@ bool g_stacked;     // icon above the percentage (menu option, PR #525)
 bool g_showPercentSign = true;  // '%' after numeric levels (menu option, PR #1386)
 bool g_ringStyle;   // device icon inside a ring that fills with the charge (menu option, PR #110)
 bool g_connectionIcons;  // wireless mark after 2.4 GHz devices' levels (menu option, PR #2277)
+bool g_deviceDivider;    // thin line between neighbouring devices on the taskbar (menu option)
 bool g_vertical;    // the primary taskbar is docked left or right: one block per device, stacked (PR #321)
 bool g_makeRoom = true;  // step past other apps' widgets in the taskbar instead of covering them
 widget::VerticalPlace g_place = widget::VerticalPlace::Auto;  // where the column sits on such a taskbar (menu option)
@@ -498,6 +499,14 @@ int GapPx(int base = 14) {
 }
 // Distance between a device icon and its percentage text (the "text spacing" setting).
 int TextGapPx() { return Pxf(g_textStyle.iconGap); }
+// Separator line thickness, and the gap between devices when the separator is on. One padding value
+// is used on both sides of the line, so together with the line it sets the device spacing.
+int DividerLineW() { return std::max(2, Px(2)); }
+int DividerPadPx() { return Pxf(g_textStyle.dividerGap); }
+int DividerGapPx() { return DividerPadPx() * 2 + DividerLineW(); }
+// Gap between neighbouring devices: with the separator on it is made of the two custom paddings
+// around the line, otherwise the ordinary device-spacing value is used.
+int DeviceGapPx(int base = 14) { return g_deviceDivider ? DividerGapPx() : GapPx(base); }
 
 // Grayscale coverage mask of a string, cropped to its ink bounds.
 struct Mask {
@@ -632,7 +641,12 @@ struct Piece {
     Mask halo;        // glow drawn behind the glyph (branded devices)
     int haloR = 0, haloAlpha = 0;
     int px = INT_MIN, py = 0;  // fixed top-left position (stacked and vertical layouts); INT_MIN = flow left to right
+    bool deviceEnd = false;  // last piece of a device that has a following device (gapAfter holds the gap)
 };
+
+// Device separators, filled by Layout() and drawn by PaintStrip(): filled rects in strip pixels.
+struct Divider { int x, y, w, h; };
+std::vector<Divider> g_divs;
 
 // Coverage masks for a ring of diameter d (PR #110): the full circle (track) and the arc that starts at
 // 12 o'clock and runs clockwise over `fraction` of it. 3x3 supersampled for smooth edges.
@@ -667,6 +681,7 @@ void RingMasks(int d, double stroke, double fraction, Mask& track, Mask& arc) {
 //  * vertical (left / right taskbar, from PR #321): one device per row block, stacked top to bottom
 // `width` and `height` return the strip's size; in the vertical layout the width is the bar's.
 std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
+    g_divs.clear();
     Rgb fg = g_light ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 };
     Rgb red = g_light ? Rgb{ 196, 30, 40 } : Rgb{ 255, 90, 90 };
     Rgb charge = g_light ? Rgb{ 0, 120, 212 } : Rgb{ 96, 205, 255 };
@@ -703,7 +718,9 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             Mask track, arc;
             RingMasks(d, std::max(2.0, d / 13.0), it.percent >= 0 ? it.percent / 100.0 : 0.0, track, arc);
             int base = (int)out.size();
-            out.push_back({ std::move(track), fg, a * (g_light ? 45 : 60) / 255, i + 1 < g_items.size() ? GapPx(8) : 0 });
+            int ringGap = i + 1 < g_items.size() ? DeviceGapPx(8) : 0;
+            out.push_back({ std::move(track), fg, a * (g_light ? 45 : 60) / 255, ringGap });
+            out.back().deviceEnd = ringGap > 0;
             Piece arcPiece{ std::move(arc), it.charging ? charge : it.low ? red : fg, a, 0 };
             arcPiece.anchor = base;
             out.push_back(std::move(arcPiece));
@@ -716,7 +733,9 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         }
         Rgb tc = it.low ? red : fg;
         bool mark = it.charging || it.full;  // bolt while charging, green check mark once full
-        bool link = !mark && g_connectionIcons && it.wirelessLink;  // wireless mark otherwise (opt-in)
+        // The connection mark is shown on every device, including offline ones -- for those it is
+        // the only hint left about how the device used to be connected. Charging wins over it.
+        bool link = !mark && g_connectionIcons && it.link != LinkKind::None;
         size_t glyph = out.size();
         slots.push_back({ (int)glyph, (int)glyph + 1, mark || link ? (int)glyph + 2 : -1 });
         bool branded = it.accent != Accent::None;
@@ -738,8 +757,14 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         }
         out.push_back(std::move(label));
         if (mark) out.push_back({ RenderMask(std::wstring(1, it.full ? icons::G().check : icons::G().bolt), boltFont, g_light), it.full ? full : charge, a, 0 });
-        else if (link) out.push_back({ RenderMask(std::wstring(1, icons::G().wifi), boltFont, g_light), fg, a * 160 / 255, 0 });
-        out.back().gapAfter = i + 1 < g_items.size() ? GapPx() : 0;
+        else if (link) {
+            const wchar_t g = it.link == LinkKind::Bluetooth ? icons::G().bluetooth
+                            : it.link == LinkKind::Wired      ? icons::G().usb
+                                                              : icons::G().wifi;
+            out.push_back({ RenderMask(std::wstring(1, g), boltFont, g_light), fg, a * 160 / 255, 0 });
+        }
+        out.back().gapAfter = i + 1 < g_items.size() ? DeviceGapPx() : 0;
+        out.back().deviceEnd = out.back().gapAfter > 0;
         if (!it.label.empty()) {  // tiny caption in the bottom-right corner of the icon
             Piece c{ RenderMask(it.label, caption, g_light), fg, a, 0 };
             c.anchor = (int)glyph;
@@ -767,7 +792,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         // One block per device, centred in the bar's width: icon, then the percentage (and bolt) under it.
         // Spaced like the notification area's own icons, so the column reads as part of it.
         width = barW;
-        const int pad = Px(10), blockGap = GapPx(12), iconGap = TextGapPx();
+        const int pad = Px(10), blockGap = DeviceGapPx(12), iconGap = TextGapPx();
         int y = pad;
         if (slots.empty()) {
             // No devices yet (startup, or the last one disconnected): only the placeholder icon. Without this
@@ -779,7 +804,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             height = y + ic.m.h + pad;
             return out;
         }
-        for (const Slot& s : slots) {
+        for (size_t si = 0; si < slots.size(); si++) {
+            const Slot& s = slots[si];
             Piece& ic = out[s.icon];
             Piece& lb = out[s.label];
             int boltW = s.bolt >= 0 ? Px(2) + out[s.bolt].m.w : 0;
@@ -793,6 +819,12 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
                 out[s.bolt].py = y + (lb.m.h - out[s.bolt].m.h) / 2;
             }
             y += lb.m.h + (lb.barPct >= 0 ? barRoom : 0) + blockGap;
+            // Horizontal rule in the gap between two stacked device blocks, after the left (top) padding.
+            if (g_deviceDivider && si + 1 < slots.size()) {
+                int ty = y - blockGap + DividerPadPx();
+                int dw = DividerLineW();
+                g_divs.push_back({ Px(10), ty, barW - Px(20), dw });
+            }
         }
         height = y - blockGap + pad;
         return out;
@@ -801,7 +833,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         // Icon on top (bolt to its right), percentage centred under it; the pair centred in the bar's height.
         int top = (barH - (iconH + rowGap + textH + barRoom)) / 2;
         int x = Px(8);
-        for (const Slot& s : slots) {
+        for (size_t si = 0; si < slots.size(); si++) {
+            const Slot& s = slots[si];
             Piece& ic = out[s.icon];
             Piece& lb = out[s.label];
             int boltW = s.bolt >= 0 ? Px(2) + out[s.bolt].m.w : 0;
@@ -814,14 +847,33 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             }
             lb.px = x + (slotW - lb.m.w) / 2;
             lb.py = top + iconH + rowGap;
-            x += slotW + GapPx(10);
+            int deviceGap = DeviceGapPx(10);
+            x += slotW + deviceGap;
+            // Vertical rule between two side-by-side device blocks: the gap is left padding + line +
+            // right padding, so place the line after the left padding rather than dead centre.
+            if (g_deviceDivider && si + 1 < slots.size()) {
+                int lx = x - deviceGap + DividerPadPx();
+                int dh = iconH + rowGap + textH;
+                int dw = DividerLineW();
+                g_divs.push_back({ lx, top, dw, dh });
+            }
         }
-        width = x - GapPx(10) + Px(8);
+        width = x - DeviceGapPx(10) + Px(8);
         return out;
     }
     width = Px(8) * 2;
-    for (auto& p : out)
-        if (p.anchor < 0) width += p.m.w + p.gapAfter;
+    int flowX = Px(8);
+    for (auto& p : out) {
+        if (p.anchor < 0) {
+            if (g_deviceDivider && p.deviceEnd && p.gapAfter > 0) {
+                int lx = flowX + p.m.w + DividerPadPx();
+                int dh = Px(12);  // short rule centred in the strip
+                g_divs.push_back({ lx, (height - dh) / 2, DividerLineW(), dh });
+            }
+            flowX += p.m.w + p.gapAfter;
+            width += p.m.w + p.gapAfter;
+        }
+    }
     return out;
 }
 
@@ -887,6 +939,16 @@ bool PaintStrip(HWND wnd, HWND taskbar, bool hover, SIZE& size) {
                     if (ox || oy) cv.Draw(p.m, xs[i] + ox, ys[i] + oy, barColor, 255);
         }
         cv.Draw(p.m, xs[i], ys[i], p.color, p.alpha);
+    }
+
+    // Device separators on top of everything: a soft rule in the same tone as the text.
+    if (g_deviceDivider) {
+        Rgb c = g_light ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 };
+        int a = g_light ? 55 : 64;
+        for (const Divider& d : g_divs)
+            for (int yy = d.y; yy < d.y + d.h; yy++)
+                for (int xx = d.x; xx < d.x + d.w; xx++)
+                    cv.Blend(xx, yy, c, a);
     }
 
     HDC screen = GetDC(nullptr);
@@ -1251,8 +1313,10 @@ LRESULT CALLBACK WidgetProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             SetHover(h, false);
             return 0;
         case WM_LBUTTONUP:
+            PostMessageW(g_notify, g_clickMsg, 0, 0);  // left: device menu
+            return 0;
         case WM_RBUTTONUP:
-            PostMessageW(g_notify, g_clickMsg, 0, 0);
+            PostMessageW(g_notify, g_clickMsg, 1, 0);  // right: settings menu
             return 0;
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
@@ -1381,6 +1445,12 @@ void SetTextStyle(const TextStyle& style) {
 
 void SetConnectionIcons(bool on) {
     g_connectionIcons = on;
+    PaintAll();
+    if (g_wnd) Reposition();
+}
+
+void SetDeviceDivider(bool on) {
+    g_deviceDivider = on;
     PaintAll();
     if (g_wnd) Reposition();
 }

@@ -18,6 +18,7 @@
 // confirmed on a real MCHOSE L7 Ultra (5253:1020, receiver) and MCHOSE A5 V2 Ultra (3837:100C,
 // receiver, level verified against the vendor software).
 #include "drivers.h"
+#include <algorithm>
 
 namespace {
 
@@ -33,11 +34,8 @@ const BYTE kCmdStatus = 0x06;
 int ParseStatus(const std::vector<BYTE>& r, USHORT vid, USHORT pid, int& level, int& charging, int& flags) {
     if (r.size() < 13 || r[0] != kReport || r[1] != (kCmdStatus ^ 0xFF)) return -1;
     BYTE p[11];
-    for (int i = 0; i < 11; i++) p[i] = r[2 + i] ^ 0xFF;
-    bool allZero = true;
-    for (BYTE b : p)
-        if (b) allZero = false;
-    if (allZero) return 0;
+    std::transform(r.begin() + 2, r.begin() + 13, std::begin(p), [](BYTE b) { return (BYTE)(b ^ 0xFF); });
+    if (std::all_of(std::begin(p), std::end(p), [](BYTE b) { return b == 0; })) return 0;
     const USHORT pairedVid = (USHORT)(p[0] | (p[1] << 8));
     const USHORT model = (USHORT)(p[2] | (p[3] << 8));
     // The L7 Ultra+ on the shared 5253:1020 receiver reports its paired identity as 3837:4016.

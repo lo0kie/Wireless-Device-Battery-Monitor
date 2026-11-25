@@ -305,14 +305,13 @@ DeviceKind GuessKind(const std::wstring& name) {
 }
 
 DeviceKind KindFromCollections(const std::vector<HidColl>& all, USHORT vid, USHORT pid) {
-    bool mouse = false, pad = false, kbd = false;
+    bool pad = false, kbd = false;
     for (const auto& c : all) {
         if (c.vid != vid || c.pid != pid || c.page() != 0x01) continue;
-        mouse |= c.usage() == 0x02;
+        if (c.usage() == 0x02) return DeviceKind::Mouse;  // highest priority: no need to scan on
         pad |= c.usage() == 0x04 || c.usage() == 0x05;
         kbd |= c.usage() == 0x06;
     }
-    if (mouse) return DeviceKind::Mouse;
     if (pad) return DeviceKind::Gamepad;
     if (kbd) return DeviceKind::Keyboard;
     return DeviceKind::Other;
