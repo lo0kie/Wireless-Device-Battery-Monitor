@@ -23,6 +23,17 @@ struct WidgetItem {
 };
 
 namespace widget {
+// Text appearance of the strip. Sizes and gaps are in DPI-independent pixels; an empty `face` keeps
+// the Windows UI font. Kept across Create/Destroy, like the other display options.
+struct TextStyle {
+    std::wstring face;        // e.g. L"Microsoft YaHei"; empty = Segoe UI Variable Text / Segoe UI
+    int size = 13;            // percentage text height, 9..24 px
+    int weight = 400;         // font weight, 100..900 (400 = normal, 700 = bold)
+    int iconSize = 16;        // device icon height, 10..28 px (independent of text size)
+    int iconGap = 5;          // space between a device icon and its percentage text, 0..24 px
+    int itemGap = 14;         // space between devices, 2..60 px
+};
+void SetTextStyle(const TextStyle& style);
 // The Segoe Fluent Icons glyph the strip uses for a kind of device (also used by the menu).
 wchar_t DeviceGlyph(DeviceKind kind, bool bluetooth);
 // Creates the widget on the primary taskbar. Clicks are reported by posting `clickMsg` to `notifyWnd`.

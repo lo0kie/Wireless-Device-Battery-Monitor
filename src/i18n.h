@@ -6,6 +6,7 @@
 //     @name = Türkçe
 //     Refresh now = Şimdi yenile
 //     {name} is at {percent}% = {name}: %{percent} kaldı
+// Spaces around '=' are optional ("Refresh now=Şimdi yenile" works too).
 // Lines starting with # are comments; "\n" in a translation is a line break. Placeholders are named
 // ({name}, {percent}), so a mistake in a translation can never crash the app: at worst a word is wrong.
 // Missing phrases stay English.

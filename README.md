@@ -34,6 +34,7 @@ Battery levels of your wireless mouse, headset, keyboard and controller, right o
 - **Disconnected (optional):** turn on *Show disconnected devices* to display a dimmed `×` for devices whose driver explicitly reports an offline wireless link. This does not infer disconnection from a missed battery poll; the default remains to hide offline devices.
 - **Two devices of one kind:** with two mice (or two controllers...) both would get the same icon, so each one gets a tiny caption of up to 3 letters in the corner of its icon, taken from its name (`MX`, `PRO`), or a number when the names do not tell them apart. A device that is alone in its kind shows no caption.
 - **Theme:** it follows light/dark mode and DPI scaling.
+- **Text style:** *Display settings → Text style...* picks the font, text size (9-24 px), weight (100-900), icon size (10-28 px), icon-to-text spacing and spacing between devices; the choice is saved for the next start.
 - **Transparent taskbar themes** (e.g. Windhawk's Taskbar Styler): turn on *Background behind taskbar text* in the menu to keep the text readable over the wallpaper.
 - **Several monitors:** the widget shows on every monitor's taskbar, next to its clock, so it stays visible while a game runs fullscreen. *Show the widget on* in the menu picks *All monitors*, *Main monitor only*, or one display (e.g. only *Display 3*).
 - **More display options:** *Icons above percentages* stacks each icon over its level to save width; *Brand colors* shows known brands in their color (Razer green, HyperX red, ...) with a small level bar; two devices of the same kind get a tiny caption so they can be told apart; left and right taskbars get a column of devices.
@@ -452,7 +453,7 @@ Refresh now = Aggiorna ora
 
 - **Use your own language right away:** choose *Language → Add your own language...* in the menu. It opens `%APPDATA%\WirelessBattery\lang` with `_template.txt`, which lists every phrase. Copy it to e.g. `it.txt`, fill in `@code`, `@name` and the translations, and the language appears in the menu (no restart needed). A file there with the same `@code` as a built-in language replaces its phrases, so you can also fix a single word locally.
 - **Share it with everyone:** send the file as a pull request to [`lang/`](lang). The build includes every file in that folder automatically; no code change is needed.
-- Keep `{placeholders}` as they are, and add `@rtl = 1` for right-to-left scripts. Phrases left empty stay English, so a partial translation is fine.
+- Keep `{placeholders}` as they are, and add `@rtl = 1` for right-to-left scripts. Spaces around `=` are optional. Phrases left empty stay English, so a partial translation is fine.
 - The `--list` and `--dump` output stays English on purpose: it is pasted into GitHub issues.
 
 ## Credits

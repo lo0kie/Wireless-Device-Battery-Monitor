@@ -69,6 +69,7 @@ Could not save history changes. = Nem sikerült menteni az előzmények módosí
 Hide last known / asleep devices = Utolsó ismert / alvó eszközök elrejtése
 Show disconnected devices = Leválasztott eszközök megjelenítése
 Record battery history = Akkumulátor-előzmények rögzítése
+Display style = Megjelenítési stílus
 Show on the taskbar (icon + percentage) = Megjelenítés a tálcán (ikon + százalék)
 Show as tray icons = Megjelenítés tálcaikonként
 Background behind taskbar text (for transparent taskbars) = Háttér a tálca szövege mögött (átlátszó tálcákhoz)

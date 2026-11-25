@@ -1,6 +1,7 @@
 #include "widget.h"
 
 #include "i18n.h"
+#include "icon_font.h"
 
 #include <commctrl.h>
 #include <uiautomation.h>
@@ -23,6 +24,7 @@ bool g_makeRoom = true;  // step past other apps' widgets in the taskbar instead
 widget::VerticalPlace g_place = widget::VerticalPlace::Auto;  // where the column sits on such a taskbar (menu option)
 bool g_farLeft;     // at the left end of the taskbar instead of next to the clock (menu option)
 bool g_beforeApps;  // just left of Start / the first task button, centred taskbar (menu option, PR #760)
+widget::TextStyle g_textStyle;  // user-selected text font, size, letter spacing and device spacing
 std::vector<WidgetItem> g_items;
 std::wstring g_tipText;
 RECT g_lastTray{}, g_lastBar{}, g_lastWidgets{};
@@ -463,21 +465,8 @@ void ApplyTipTheme() {
 }
 
 wchar_t Glyph(DeviceKind k, bool bluetooth) {
-    switch (k) {
-        case DeviceKind::Headset:  return 0xE7F6;  // Headphone
-        case DeviceKind::Mouse:    return 0xE962;  // Mouse
-        case DeviceKind::Keyboard: return 0xE765;  // KeyboardClassic
-        case DeviceKind::Gamepad:  return 0xE7FC;  // Game
-        case DeviceKind::Phone:    return 0xE8EA;  // CellPhone
-        case DeviceKind::Microphone: return 0xE720;  // Microphone
-        case DeviceKind::Speaker:  return 0xE7F5;  // Speakers
-        default:                   return bluetooth ? 0xE702 : 0xE772;  // Bluetooth / Devices
-    }
+    return icons::Device(k, bluetooth);  // Material Icons, with Segoe fallback
 }
-constexpr wchar_t kBolt = 0xE945;            // LightningBolt
-constexpr wchar_t kCheck = 0xE73E;           // CheckMark, in place of the bolt once fully charged
-constexpr wchar_t kWifi = 0xE701;            // Wifi: device on a 2.4 GHz receiver (PR #2277)
-constexpr wchar_t kBatteryUnknown = 0xE996;  // shown when there is nothing to display
 
 // Creates a font, falling back when the preferred face is not installed (GDI would silently substitute).
 HFONT MakeFont(int px, int weight, const wchar_t* face, const wchar_t* fallback, int fallbackPx = 0) {
@@ -496,6 +485,15 @@ HFONT MakeFont(int px, int weight, const wchar_t* face, const wchar_t* fallback,
     }
     return nullptr;
 }
+
+// Text captions follow the text size; icons follow their own size setting. The defaults (13 / 16 px)
+// keep the original proportions.
+int TextPx(int base) { return MulDiv(base, g_textStyle.size, 13); }
+int IconPx(int base) { return MulDiv(base, g_textStyle.iconSize, 16); }
+// Device gap for the three layouts: the normal row uses the full value, stacked and vertical use less.
+int GapPx(int base = 14) { return Px(std::max(2, MulDiv(g_textStyle.itemGap, base, 14))); }
+// Distance between a device icon and its percentage text (the "text spacing" setting).
+int TextGapPx() { return Px(g_textStyle.iconGap); }
 
 // Grayscale coverage mask of a string, cropped to its ink bounds.
 struct Mask {
@@ -649,33 +647,43 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
     Rgb red = g_light ? Rgb{ 196, 30, 40 } : Rgb{ 255, 90, 90 };
     Rgb charge = g_light ? Rgb{ 0, 120, 212 } : Rgb{ 96, 205, 255 };
     Rgb full = g_light ? Rgb{ 16, 124, 16 } : Rgb{ 108, 203, 95 };  // Windows "success" green
-    HFONT icons = MakeFont(Px(16), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
-    HFONT bolt = MakeFont(Px(11), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
-    HFONT text = MakeFont(Px(13), FW_NORMAL, L"Segoe UI Variable Text", L"Segoe UI", Px(12));
-    HFONT caption = MakeFont(std::max(8, Px(7)), FW_SEMIBOLD, L"Segoe UI Variable Text", L"Segoe UI");  // never under 8 px
+    HFONT iconFont = icons::Ready() ? icons::Font(Px(IconPx(16)))
+                                    : MakeFont(Px(IconPx(16)), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
+    HFONT boltFont = icons::Ready() ? icons::Font(Px(IconPx(11)))
+                                    : MakeFont(Px(IconPx(11)), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets");
+    // A user-chosen face replaces the Windows UI font for both the percentage and its tiny caption.
+    // GDI substitutes unknown faces silently, so MakeFont checks the face name and falls back to Segoe UI.
+    auto uiFont = [&](int px, int weight) {
+        return g_textStyle.face.empty() ? MakeFont(px, weight, L"Segoe UI Variable Text", L"Segoe UI", px - Px(1))
+                                        : MakeFont(px, weight, g_textStyle.face.c_str(), L"Segoe UI", px);
+    };
+    HFONT text = uiFont(Px(g_textStyle.size), g_textStyle.weight);
+    HFONT caption = uiFont(Px(std::max(8, TextPx(7))), g_textStyle.weight);  // never under 8 px
     // Ring style (PR #110) is drawn in the normal one-row layout only; stacked and vertical keep the text.
     const bool ring = g_ringStyle && !g_stacked && barH <= barW;
-    HFONT ringIcons = ring ? MakeFont(Px(11), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets") : nullptr;
+    HFONT ringIconFont = ring ? (icons::Ready() ? icons::Font(Px(IconPx(11)))
+                                                     : MakeFont(Px(IconPx(11)), FW_NORMAL, L"Segoe Fluent Icons", L"Segoe MDL2 Assets"))
+                               : nullptr;
 
     std::vector<Piece> out;
     struct Slot { int icon, label, bolt; };  // indices of one device's pieces
     std::vector<Slot> slots;
-    if (g_items.empty()) out.push_back({ RenderMask(std::wstring(1, kBatteryUnknown), icons, g_light), fg, 110, 0 });
+    if (g_items.empty()) out.push_back({ RenderMask(std::wstring(1, icons::G().batteryUnknown), iconFont, g_light), fg, 110, 0 });
     for (size_t i = 0; i < g_items.size(); i++) {
         const auto& it = g_items[i];
         int a = it.dim ? 120 : 255;
         if (ring) {
             // The arc is the charge: red when low, blue while charging; the faint full circle is the track.
-            int d = Px(28);
+            int d = Px(IconPx(28));
             d += d & 1;  // even, so the ring and the icon share an exact centre
             Mask track, arc;
             RingMasks(d, std::max(2.0, d / 13.0), it.percent >= 0 ? it.percent / 100.0 : 0.0, track, arc);
             int base = (int)out.size();
-            out.push_back({ std::move(track), fg, a * (g_light ? 45 : 60) / 255, i + 1 < g_items.size() ? Px(8) : 0 });
+            out.push_back({ std::move(track), fg, a * (g_light ? 45 : 60) / 255, i + 1 < g_items.size() ? GapPx(8) : 0 });
             Piece arcPiece{ std::move(arc), it.charging ? charge : it.low ? red : fg, a, 0 };
             arcPiece.anchor = base;
             out.push_back(std::move(arcPiece));
-            Piece glyph{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), ringIcons, g_light), fg, a, 0 };
+            Piece glyph{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), ringIconFont, g_light), fg, a, 0 };
             glyph.anchor = base;
             glyph.bx = (d - glyph.m.w) / 2;
             glyph.by = (d - glyph.m.h) / 2;
@@ -690,7 +698,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         bool branded = it.accent != Accent::None;
         BrandColor bc = AccentColor(it.accent, g_light);
         Rgb accent{ bc.r, bc.g, bc.b };
-        Piece icon{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), icons, g_light), branded ? accent : fg, a, Px(5) };
+        Piece icon{ RenderMask(std::wstring(1, Glyph(it.kind, it.bluetooth)), iconFont, g_light), branded ? accent : fg, a, TextGapPx() };
         if (branded && !it.dim) {
             icon.haloR = Px(3);
             icon.halo = Halo(icon.m, icon.haloR);
@@ -698,15 +706,15 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         }
         out.push_back(std::move(icon));
         std::wstring t = !it.text.empty() ? it.text : it.percent >= 0 ? std::to_wstring(it.percent) + (g_showPercentSign ? L"%" : L"") : L"?";
-        Piece label{ RenderMask(t, text, g_light), tc, a, mark || link ? Px(2) : 0 };
+        Piece label{ RenderMask(t, text, g_light), tc, a, mark || link ? TextGapPx() : 0 };
         if (branded && it.percent >= 0) {
             label.barPct = it.percent;
             label.barColor = it.low ? red : accent;
         }
         out.push_back(std::move(label));
-        if (mark) out.push_back({ RenderMask(std::wstring(1, it.full ? kCheck : kBolt), bolt, g_light), it.full ? full : charge, a, 0 });
-        else if (link) out.push_back({ RenderMask(std::wstring(1, kWifi), bolt, g_light), fg, a * 160 / 255, 0 });
-        out.back().gapAfter = i + 1 < g_items.size() ? Px(14) : 0;
+        if (mark) out.push_back({ RenderMask(std::wstring(1, it.full ? icons::G().check : icons::G().bolt), boltFont, g_light), it.full ? full : charge, a, 0 });
+        else if (link) out.push_back({ RenderMask(std::wstring(1, icons::G().wifi), boltFont, g_light), fg, a * 160 / 255, 0 });
+        out.back().gapAfter = i + 1 < g_items.size() ? GapPx() : 0;
         if (!it.label.empty()) {  // tiny caption in the bottom-right corner of the icon
             Piece c{ RenderMask(it.label, caption, g_light), fg, a, 0 };
             c.anchor = (int)glyph;
@@ -715,14 +723,14 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             out.push_back(c);
         }
     }
-    DeleteObject(icons);
-    DeleteObject(bolt);
+    DeleteObject(iconFont);
+    DeleteObject(boltFont);
     DeleteObject(text);
     DeleteObject(caption);
-    if (ringIcons) DeleteObject(ringIcons);
+    if (ringIconFont) DeleteObject(ringIconFont);
 
     height = barH;
-    const int rowGap = Px(2), barRoom = Px(5);  // barRoom: space for a brand level bar under the text
+    const int rowGap = TextGapPx(), barRoom = Px(5);  // barRoom: space for a brand level bar under the text
     int iconH = 0, textH = 0;
     for (const Slot& s : slots) {
         iconH = std::max(iconH, out[s.icon].m.h);
@@ -734,7 +742,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         // One block per device, centred in the bar's width: icon, then the percentage (and bolt) under it.
         // Spaced like the notification area's own icons, so the column reads as part of it.
         width = barW;
-        const int pad = Px(10), blockGap = Px(12), iconGap = Px(3);
+        const int pad = Px(10), blockGap = GapPx(12), iconGap = TextGapPx();
         int y = pad;
         if (slots.empty()) {
             // No devices yet (startup, or the last one disconnected): only the placeholder icon. Without this
@@ -756,7 +764,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             lb.px = (barW - lb.m.w - boltW) / 2;
             lb.py = y;
             if (s.bolt >= 0) {
-                out[s.bolt].px = lb.px + lb.m.w + Px(2);
+                out[s.bolt].px = lb.px + lb.m.w + TextGapPx();
                 out[s.bolt].py = y + (lb.m.h - out[s.bolt].m.h) / 2;
             }
             y += lb.m.h + (lb.barPct >= 0 ? barRoom : 0) + blockGap;
@@ -781,9 +789,9 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             }
             lb.px = x + (slotW - lb.m.w) / 2;
             lb.py = top + iconH + rowGap;
-            x += slotW + Px(10);
+            x += slotW + GapPx(10);
         }
-        width = x - Px(10) + Px(8);
+        width = x - GapPx(10) + Px(8);
         return out;
     }
     width = Px(8) * 2;
@@ -1338,6 +1346,12 @@ void SetLightTheme(bool light) {
 void SetBackground(bool on) {
     g_background = on;
     PaintAll();
+}
+
+void SetTextStyle(const TextStyle& style) {
+    g_textStyle = style;
+    PaintAll();
+    if (g_wnd) Reposition();
 }
 
 void SetConnectionIcons(bool on) {

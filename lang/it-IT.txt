@@ -69,6 +69,7 @@ Could not save history changes. = Impossibile salvare le modifiche alla cronolog
 Hide last known / asleep devices = Nascondi dispositivi in sospensione
 Show disconnected devices = Mostra dispositivi disconnessi
 Record battery history = Registra cronologia batteria
+Display style = Stile di visualizzazione
 Show on the taskbar (icon + percentage) = Mostra sulla barra delle applicazioni (icona + percentuale)
 Show as tray icons = Mostra come icona del vassoio
 Background behind taskbar text (for transparent taskbars) = Sfondo dietro il testo della barra delle applicazioni (per barre delle applicazioni trasparenti)

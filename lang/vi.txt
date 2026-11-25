@@ -73,6 +73,7 @@ Could not save history changes. = Không thể lưu các thay đổi lịch sử
 Hide last known / asleep devices = Ẩn thiết bị đang ngủ / ngắt kết nối
 Show disconnected devices = Hiện thiết bị đã ngắt kết nối
 Record battery history = Ghi lại lịch sử pin
+Display style = Kiểu hiển thị
 Show on the taskbar (icon + percentage) = Hiện trên Taskbar (Icon + % Pin)
 Show as tray icons = Hiện icon ở khay hệ thống (Tray)
 Background behind taskbar text (for transparent taskbars) = Đổ nền chữ Taskbar (cho Taskbar trong suốt)

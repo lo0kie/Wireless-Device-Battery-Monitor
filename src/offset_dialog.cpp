@@ -1,27 +1,31 @@
 #include "offset_dialog.h"
+#include "dialog_shell.h"
 #include "i18n.h"
 
-#include <algorithm>
 #include <cwchar>
 #include <string>
 
-// Same shape as the rename dialog: one label, one edit box, Save and Cancel.
+// One label, one edit box, Save and Cancel — on the shared dialog shell, so it matches the text
+// style dialog and the rest of the system.
 namespace {
 constexpr wchar_t kWindowClass[] = L"WirelessBatteryOffsetDialog";
+
+constexpr int kClientW = 468, kClientH = 126;
+constexpr int kFieldW = kClientW - dlg::kPad * 2;
+
+enum : int { kIdEdit = 100, kIdError = 200 };
 
 struct OffsetState {
     int initial = 0;
     int result = 0;
     HWND edit = nullptr;
+    HWND error = nullptr;
+    HFONT uiFont = nullptr;
     bool accepted = false;
 };
 
 OffsetState* State(HWND hwnd) {
     return reinterpret_cast<OffsetState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-}
-
-void SetControlFont(HWND control) {
-    if (control) SendMessageW(control, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
 }
 
 // Whole number in range, optional leading minus; anything else is rejected.
@@ -48,31 +52,34 @@ LRESULT CALLBACK OffsetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE: {
             HINSTANCE inst = GetModuleHandleW(nullptr);
-            const int dpi = GetDpiForWindow(hwnd);
-            auto scale = [dpi](int v) { return MulDiv(v, dpi, 96); };
+            const int dpi = (int)GetDpiForWindow(hwnd);
+            auto s = [dpi](int v) { return MulDiv(v, dpi, 96); };
             HWND label = CreateWindowExW(0, L"STATIC",
                                          T(L"Pixels from the notification area (negative moves it closer):"),
-                                         WS_CHILD | WS_VISIBLE, scale(16), scale(18), scale(382), scale(22),
+                                         WS_CHILD | WS_VISIBLE, s(dlg::kPad), s(10), s(kFieldW), s(dlg::kLabelH),
                                          hwnd, nullptr, inst, nullptr);
             state->edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", std::to_wstring(state->initial).c_str(),
                                           WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-                                          scale(16), scale(45), scale(382), scale(25),
-                                          hwnd, (HMENU)(INT_PTR)100, inst, nullptr);
+                                          s(dlg::kPad), s(30), s(kFieldW), s(dlg::kFieldH),
+                                          hwnd, (HMENU)(INT_PTR)kIdEdit, inst, nullptr);
+            state->error = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
+                                           s(dlg::kPad), s(60), s(kFieldW), s(dlg::kLabelH),
+                                           hwnd, (HMENU)(INT_PTR)kIdError, inst, nullptr);
             HWND save = CreateWindowExW(0, L"BUTTON", T(L"Save"),
                                         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                                        scale(220), scale(85), scale(85), scale(29),
-                                        hwnd, (HMENU)(INT_PTR)IDOK, inst, nullptr);
+                                        s(kClientW - dlg::kPad - dlg::kButtonW), s(88), s(dlg::kButtonW),
+                                        s(dlg::kButtonH), hwnd, (HMENU)(INT_PTR)IDOK, inst, nullptr);
             HWND cancel = CreateWindowExW(0, L"BUTTON", T(L"Cancel"),
-                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                          scale(313), scale(85), scale(85), scale(29),
-                                          hwnd, (HMENU)(INT_PTR)IDCANCEL, inst, nullptr);
-            SetControlFont(label);
-            SetControlFont(state->edit);
-            SetControlFont(save);
-            SetControlFont(cancel);
+                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                                          s(kClientW - dlg::kPad - dlg::kButtonW * 2 - dlg::kButtonGap), s(88),
+                                          s(dlg::kButtonW), s(dlg::kButtonH), hwnd, (HMENU)(INT_PTR)IDCANCEL, inst,
+                                          nullptr);
+            state->uiFont = dlg::SystemFont(dpi);
+            if (state->uiFont) {
+                for (HWND c : { label, state->edit, state->error, save, cancel })
+                    SendMessageW(c, WM_SETFONT, (WPARAM)state->uiFont, TRUE);
+            }
             SendMessageW(state->edit, EM_SETLIMITTEXT, 6, 0);
-            SetFocus(state->edit);
-            SendMessageW(state->edit, EM_SETSEL, 0, -1);
             return 0;
         }
         case WM_COMMAND:
@@ -84,8 +91,9 @@ LRESULT CALLBACK OffsetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     std::wstring text = TF(L"Enter a whole number from {min} to {max}.",
                                            { { L"min", std::to_wstring(kMinTaskbarOffset) },
                                              { L"max", std::to_wstring(kMaxTaskbarOffset) } });
-                    MessageBoxW(hwnd, text.c_str(), T(L"Position on the taskbar"), MB_OK | MB_ICONINFORMATION);
+                    SetWindowTextW(state->error, text.c_str());
                     SetFocus(state->edit);
+                    SendMessageW(state->edit, EM_SETSEL, 0, -1);
                     return 0;
                 }
                 state->result = value;
@@ -96,6 +104,10 @@ LRESULT CALLBACK OffsetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (LOWORD(wp) == IDCANCEL) { DestroyWindow(hwnd); return 0; }
             break;
         case WM_CLOSE: DestroyWindow(hwnd); return 0;
+        case WM_NCDESTROY:
+            if (state->uiFont) DeleteObject(state->uiFont);
+            state->uiFont = nullptr;
+            break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
@@ -109,46 +121,20 @@ bool PromptTaskbarOffset(HWND owner, int current, int& result) {
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = kWindowClass;
+    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIconSm = wc.hIcon;
     if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
-
-    const int dpi = owner ? GetDpiForWindow(owner) : 96;
-    const int width = MulDiv(420, dpi, 96), height = MulDiv(157, dpi, 96);
-    POINT p{};
-    GetCursorPos(&p);
-    HMONITOR monitor = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
-    MONITORINFO mi{ sizeof(mi) };
-    RECT area{};
-    if (GetMonitorInfoW(monitor, &mi)) area = mi.rcWork;
-    else SystemParametersInfoW(SPI_GETWORKAREA, 0, &area, 0);
-    int x = std::max(area.left + ((area.right - area.left - width) / 2), area.left);
-    int y = std::max(area.top + ((area.bottom - area.top - height) / 2), area.top);
 
     OffsetState state;
     state.initial = current;
-    HWND dialog = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_TOOLWINDOW, kWindowClass,
-                                  T(L"Position on the taskbar"), WS_CAPTION | WS_SYSMENU | WS_POPUP,
-                                  x, y, width, height, owner, nullptr, inst, &state);
-    if (!dialog) return false;
-
-    const bool ownerEnabled = owner && IsWindowEnabled(owner);
-    if (ownerEnabled) EnableWindow(owner, FALSE);
-    ShowWindow(dialog, SW_SHOW);
-    UpdateWindow(dialog);
-    SetForegroundWindow(dialog);
-    MSG msg{};
-    while (IsWindow(dialog)) {
-        BOOL code = GetMessageW(&msg, nullptr, 0, 0);
-        if (code <= 0) {
-            if (code == 0) PostQuitMessage((int)msg.wParam);
-            break;
-        }
-        if (!IsDialogMessageW(dialog, &msg)) {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-    }
-    if (IsWindow(dialog)) DestroyWindow(dialog);
-    if (ownerEnabled) EnableWindow(owner, TRUE);
+    dlg::Shell shell;
+    shell.className = kWindowClass;
+    shell.title = T(L"Position on the taskbar");
+    shell.clientW = kClientW;
+    shell.clientH = kClientH;
+    shell.state = &state;
+    shell.focusId = kIdEdit;
+    if (!dlg::Run(owner, shell)) return false;
     if (state.accepted) result = state.result;
     return state.accepted;
 }

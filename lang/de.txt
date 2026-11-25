@@ -19,6 +19,7 @@ Move up = Nach oben
 Move right = Nach rechts
 Move down = Nach unten
 Hide last known / asleep devices = Zuletzt bekannte / schlafende Geräte ausblenden
+Display style = Anzeigestil
 Show on the taskbar (icon + percentage) = In der Taskleiste anzeigen (Symbol + Prozent)
 Show as tray icons = Als Symbole im Infobereich anzeigen
 Background behind taskbar text (for transparent taskbars) = Hintergrund hinter dem Taskleistentext (für transparente Taskleisten)

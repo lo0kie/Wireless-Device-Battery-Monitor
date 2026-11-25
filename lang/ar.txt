@@ -20,6 +20,7 @@ Move up = نقل للأعلى
 Move right = نقل لليمين
 Move down = نقل للأسفل
 Hide last known / asleep devices = إخفاء الأجهزة النائمة / آخر قيمة معروفة
+Display style = نمط العرض
 Show on the taskbar (icon + percentage) = إظهار على شريط المهام (أيقونة + نسبة)
 Show as tray icons = إظهار كأيقونات في منطقة الإعلامات
 Background behind taskbar text (for transparent taskbars) = خلفية خلف نص شريط المهام (للأشرطة الشفافة)

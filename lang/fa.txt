@@ -71,6 +71,7 @@ Could not save history changes. = ذخیره تغییرات تاریخچه مم�
 Hide last known / asleep devices = مخفی کردن دستگاه‌های خوابیده یا دارای آخرین مقدار ثبت‌شده
 Show disconnected devices = نمایش دستگاه‌های جداشده
 Record battery history = ثبت تاریخچه باتری
+Display style = سبک نمایش
 Show on the taskbar (icon + percentage) = نمایش در نوار وظیفه (آیکون + درصد)
 Show as tray icons = نمایش به شکل آیکون در سینی سیستم
 Background behind taskbar text (for transparent taskbars) = پس‌زمینه پشت متن نوار وظیفه (برای نوارهای وظیفه شفاف)

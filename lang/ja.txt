@@ -19,6 +19,7 @@ Move up = 上へ移動
 Move right = 右へ移動
 Move down = 下へ移動
 Hide last known / asleep devices = スリープ中 / 最後の値のデバイスを隠す
+Display style = 表示スタイル
 Show on the taskbar (icon + percentage) = タスクバーに表示（アイコン + パーセント）
 Show as tray icons = 通知領域のアイコンとして表示
 Background behind taskbar text (for transparent taskbars) = タスクバーの文字の背景（透明なタスクバー向け）

@@ -68,6 +68,7 @@ Could not save history changes. = Det gick inte att spara ändringarna i histori
 Hide last known / asleep devices = Dölj senast kända/sovande enheter
 Show disconnected devices = Visa frånkopplade enheter
 Record battery history = Samla in batterihistorik
+Display style = Visningsstil
 Show on the taskbar (icon + percentage) = Visa i aktivitetsfältet (ikon + procent)
 Show as tray icons = Visa som ikoner i systemfältet
 Background behind taskbar text (for transparent taskbars) = Bakgrund bakom texten i aktivitetsfältet (för genomskinliga aktivitetsfält)

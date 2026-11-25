@@ -32,6 +32,9 @@
 #include "report.h"
 #include "rename_dialog.h"
 #include "offset_dialog.h"
+#include "text_style_dialog.h"
+#include "popup_menu.h"
+#include "icon_font.h"
 #include "widget.h"
 #include "update_win.h"
 #include "update_apply.h"
@@ -59,7 +62,7 @@ enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
     ID_BRAND_COLORS, ID_STACKED, ID_SHOW_DISCONNECTED, ID_RECORD_HISTORY, ID_DIM_SLEEPING,
     ID_TRAY_WHEN_EMPTY, ID_MAKE_ROOM, ID_FAR_LEFT, ID_PERCENT_SIGN, ID_RING_STYLE, ID_BEFORE_APPS, ID_CONNECTION_ICONS, ID_KEEP_MOUSE_LAST_KNOWN,
-    ID_PLACE_AUTO, ID_PLACE_TOP, ID_PLACE_TRAY, ID_PLACE_BOTTOM,  // "Position on a vertical taskbar"
+    ID_PLACE_AUTO, ID_PLACE_TOP, ID_PLACE_TRAY, ID_PLACE_BOTTOM, ID_TEXT_STYLE,  // "Position on a vertical taskbar"
     ID_POSITION_FIRST = 700,  // "Position on the taskbar": ID_POSITION_FIRST + 0..5, then the custom value
     ID_POLL_FIRST = 500,  // "Check battery every": ID_POLL_FIRST + 0..7
     ID_LIMIT_OFF = 600, ID_LIMIT_FIRST,  // "Notify when charged to": off, then alerts::kChargeLimits
@@ -97,6 +100,7 @@ std::wstring g_widgetMonitor = L"all";  // which taskbars show the widget: "all"
 bool g_widgetBackground = false;  // draw a plate behind the taskbar text (transparent taskbar themes)
 bool g_stacked = false;      // icon above the percentage (menu option)
 bool g_showPercentSign = true;  // include '%' in taskbar battery labels (menu option)
+widget::TextStyle g_textStyle;  // font, size and spacing of the taskbar strip (menu option)
 bool g_ringStyle = false;  // device icon inside a battery ring (menu option, PR #110)
 bool g_connectionIcons = false;  // wireless mark for 2.4 GHz devices (menu option, PR #2277)
 bool g_makeRoom = true;      // step past other apps' taskbar widgets (menu option)
@@ -168,6 +172,7 @@ bool ReadLightTaskbar() {
     return false;
 }
 
+// Tells uxtheme to draw the remaining native bits (dialog scrollbars, tooltips) light or dark.
 void ApplyMenuTheme(bool light) {
     using SetPreferredAppModeFn = int(WINAPI*)(int);
     using FlushMenuThemesFn = void(WINAPI*)();
@@ -177,83 +182,6 @@ void ApplyMenuTheme(bool light) {
     if (setMode) setMode(light ? 3 : 2);
     if (flush) flush();
 }
-
-// Small Windows 11 icons (Segoe Fluent Icons, Segoe MDL2 Assets on Windows 10) in the menu's icon column,
-// drawn in the menu's text colour for the light or dark theme. The menu stays the native Windows menu;
-// check marks and radio marks keep their own column. The bitmaps live until the object goes away.
-class MenuIcons {
-  public:
-    explicit MenuIcons(bool light) : light_(light) {
-        UINT dpi = GetDpiForWindow(g_hwnd);
-        size_ = MulDiv(16, dpi ? (int)dpi : 96, 96);
-        for (const wchar_t* face : { L"Segoe Fluent Icons", L"Segoe MDL2 Assets" }) {
-            HFONT f = CreateFontW(-size_, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                  ANTIALIASED_QUALITY, DEFAULT_PITCH, face);
-            HDC dc = CreateCompatibleDC(nullptr);
-            HGDIOBJ old = SelectObject(dc, f);
-            wchar_t got[LF_FACESIZE] = {};
-            GetTextFaceW(dc, LF_FACESIZE, got);
-            SelectObject(dc, old);
-            DeleteDC(dc);
-            if (!_wcsicmp(got, face)) { font_ = f; break; }
-            DeleteObject(f);
-        }
-    }
-    ~MenuIcons() {
-        for (HBITMAP b : bitmaps_) DeleteObject(b);
-        if (font_) DeleteObject(font_);
-    }
-    MenuIcons(const MenuIcons&) = delete;
-    MenuIcons& operator=(const MenuIcons&) = delete;
-
-    // `item` is a command id, or a position when `byPosition` (submenus have no command id).
-    void Set(HMENU menu, UINT item, bool byPosition, wchar_t glyph) {
-        HBITMAP b = Make(glyph);
-        if (!b) return;
-        MENUITEMINFOW mii{ sizeof(mii) };
-        mii.fMask = MIIM_BITMAP;
-        mii.hbmpItem = b;
-        SetMenuItemInfoW(menu, item, byPosition ? TRUE : FALSE, &mii);
-    }
-    void SetLast(HMENU menu, wchar_t glyph) { Set(menu, (UINT)GetMenuItemCount(menu) - 1, true, glyph); }
-
-  private:
-    HBITMAP Make(wchar_t glyph) {
-        if (!font_) return nullptr;
-        BITMAPINFO bi{};
-        bi.bmiHeader = { sizeof(BITMAPINFOHEADER), size_, -size_, 1, 32, BI_RGB };
-        void* bits = nullptr;
-        HDC dc = CreateCompatibleDC(nullptr);
-        HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
-        if (!bmp) { DeleteDC(dc); return nullptr; }
-        HGDIOBJ ob = SelectObject(dc, bmp);
-        HGDIOBJ of = SelectObject(dc, font_);
-        memset(bits, 0, (size_t)size_ * size_ * 4);
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, RGB(255, 255, 255));
-        RECT r{ 0, 0, size_, size_ };
-        wchar_t s[2] = { glyph, 0 };
-        DrawTextW(dc, s, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        GdiFlush();
-        // white-on-black coverage -> premultiplied alpha in the menu text colour
-        const int c = light_ ? 0x1B : 0xF2;
-        auto* p = static_cast<DWORD*>(bits);
-        for (int i = 0; i < size_ * size_; i++) {
-            int a = ((p[i] & 0xFF) + ((p[i] >> 8) & 0xFF) + ((p[i] >> 16) & 0xFF)) / 3;
-            int v = c * a / 255;
-            p[i] = ((DWORD)a << 24) | ((DWORD)v << 16) | ((DWORD)v << 8) | (DWORD)v;
-        }
-        SelectObject(dc, of);
-        SelectObject(dc, ob);
-        DeleteDC(dc);
-        bitmaps_.push_back(bmp);
-        return bmp;
-    }
-    bool light_;
-    int size_ = 16;
-    HFONT font_ = nullptr;
-    std::vector<HBITMAP> bitmaps_;
-};
 
 std::wstring ExePath() {
     wchar_t p[MAX_PATH];
@@ -420,6 +348,37 @@ bool LoadStacked() { return LoadBoolSetting(L"StackedLayout", false); }
 void SaveStacked(bool on) { SaveBoolSetting(L"StackedLayout", on); }
 bool LoadShowPercentSign() { return LoadBoolSetting(L"ShowPercentSign", true); }
 void SaveShowPercentSign(bool on) { SaveBoolSetting(L"ShowPercentSign", on); }
+int LoadIntSetting(const wchar_t* name, int def, int min, int max) {
+    DWORD v = (DWORD)def, sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_DWORD, nullptr, &v, &sz) != ERROR_SUCCESS) return def;
+    return std::clamp((int)v, min, max);
+}
+void SaveIntSetting(const wchar_t* name, int v) {
+    DWORD d = (DWORD)v;
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, name, REG_DWORD, &d, sizeof(d));
+}
+std::wstring LoadTextFont() {
+    wchar_t buf[256] = {};
+    DWORD size = sizeof(buf) - sizeof(wchar_t);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, L"TextFont", RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
+        return buf;
+    return L"";  // Windows UI font
+}
+void SaveTextFont(const std::wstring& face) {
+    if (face.empty()) RegDeleteKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"TextFont");
+    else RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"TextFont", REG_SZ, face.c_str(),
+                         (DWORD)((face.size() + 1) * sizeof(wchar_t)));
+}
+widget::TextStyle LoadTextStyle() {
+    widget::TextStyle s;
+    s.face = LoadTextFont();
+    s.size = LoadIntSetting(L"TextSizePx", s.size, kMinTextSize, kMaxTextSize);
+    s.weight = LoadIntSetting(L"TextWeight", s.weight, kMinTextWeight, kMaxTextWeight);
+    s.iconSize = LoadIntSetting(L"TextIconSizePx", s.iconSize, kMinIconSize, kMaxIconSize);
+    s.iconGap = LoadIntSetting(L"TextIconGapPx", s.iconGap, kMinIconGap, kMaxIconGap);
+    s.itemGap = LoadIntSetting(L"TextItemGapPx", s.itemGap, kMinItemGap, kMaxItemGap);
+    return s;
+}
 bool LoadRingStyle() { return LoadBoolSetting(L"RingStyle", false); }
 void SaveRingStyle(bool on) { SaveBoolSetting(L"RingStyle", on); }
 bool LoadConnectionIcons() { return LoadBoolSetting(L"ConnectionIcons", false); }
@@ -470,18 +429,25 @@ void SetAutostart(bool on) {
 }
 
 // ---- icon rendering ---------------------------------------------------------------------------
-// Draws the percentage as large digits with a small level bar underneath. GDI text is rendered
-// white-on-black into a scratch bitmap and its brightness is used as the alpha channel, which
-// gives smooth edges on the transparent icon.
+// Tray icons are Material Icons battery glyphs, filled left-to-right by charge level. The glyph is
+// drawn white-on-black into a scratch bitmap and its brightness becomes the alpha channel, which
+// gives smooth edges on the transparent icon. A tiny Segoe fallback keeps icons present if the
+// embedded font ever fails to register.
 
 struct Rgb { BYTE r, g, b; };
+Rgb Foreground();
 
-HICON RenderIcon(const std::wstring& text, int barPct, Rgb textColor, Rgb barColor, bool dim) {
+// Segoe fallback for the rare case the embedded font cannot be registered.
+static HFONT MakeTrayFallbackFont(int px) {
+    return CreateFontW(-px, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                       CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe MDL2 Assets");
+}
+
+// Renders one icon-font glyph, auto-fitted into the tray icon square.
+static HICON RenderGlyph(wchar_t glyph, Rgb tint, bool dim, int fillPct = -1) {
     HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
     UINT dpi = taskbar ? GetDpiForWindow(taskbar) : 0;
     const int S = GetSystemMetricsForDpi(SM_CXSMICON, dpi ? dpi : GetDpiForSystem());
-    const int barH = std::max(2, S / 8);
-    const int textH = S - barH - 1;
 
     HDC dc = CreateCompatibleDC(nullptr);
     BITMAPINFO bi{};
@@ -490,7 +456,6 @@ HICON RenderIcon(const std::wstring& text, int barPct, Rgb textColor, Rgb barCol
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB;
 
-    // scratch bitmap for the glyphs
     const int W = S * 3, H = S * 2;
     bi.bmiHeader.biWidth = W;
     bi.bmiHeader.biHeight = -H;
@@ -501,52 +466,44 @@ HICON RenderIcon(const std::wstring& text, int barPct, Rgb textColor, Rgb barCol
     SetTextColor(dc, RGB(255, 255, 255));
     auto* sp = static_cast<DWORD*>(sbits);
 
-    int bx0 = 0, by0 = 0, bx1 = -1, by1 = -1;
-    for (int fh = textH * 2; fh >= 6; fh--) {
-        HFONT f = CreateFontW(-fh, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                              ANTIALIASED_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-        HGDIOBJ oldF = SelectObject(dc, f);
-        SetTextCharacterExtra(dc, text.size() >= 3 ? -1 : 0);
-        memset(sbits, 0, (size_t)W * H * 4);
-        TextOutW(dc, 2, 0, text.c_str(), (int)text.size());
-        GdiFlush();
-        SelectObject(dc, oldF);
-        DeleteObject(f);
-        bx0 = W; by0 = H; bx1 = -1; by1 = -1;
-        for (int y = 0; y < H; y++)
-            for (int x = 0; x < W; x++)
-                if (sp[y * W + x] & 0xFF) { bx0 = std::min(bx0, x); bx1 = std::max(bx1, x); by0 = std::min(by0, y); by1 = std::max(by1, y); }
-        if (bx1 < 0) break;
-        if (bx1 - bx0 + 1 <= S && by1 - by0 + 1 <= textH) break;
-    }
+    HFONT faceFont = icons::Ready() ? icons::Font(S)
+                                    : MakeTrayFallbackFont(S);
+    HGDIOBJ oldF = SelectObject(dc, faceFont);
+    memset(sbits, 0, (size_t)W * H * 4);
+    wchar_t one[2] = { glyph, 0 };
+    TextOutW(dc, 2, 0, one, 1);
+    GdiFlush();
+    SelectObject(dc, oldF);
+    if (faceFont) DeleteObject(faceFont);
+    int bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+            if (sp[y * W + x] & 0xFF) { bx0 = std::min(bx0, x); bx1 = std::max(bx1, x); by0 = std::min(by0, y); by1 = std::max(by1, y); }
 
-    // final icon bitmap
     bi.bmiHeader.biWidth = S;
     bi.bmiHeader.biHeight = -S;
     void* ibits = nullptr;
-    HBITMAP color = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &ibits, nullptr, 0);
+    HBITMAP colorBmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &ibits, nullptr, 0);
     auto* ip = static_cast<DWORD*>(ibits);
     memset(ip, 0, (size_t)S * S * 4);
     const int alphaScale = dim ? 140 : 255;
     auto put = [&](int x, int y, Rgb c, int a) {
         if (x < 0 || y < 0 || x >= S || y >= S || a <= 0) return;
         a = a * alphaScale / 255;
-        ip[y * S + x] = ((DWORD)a << 24) | ((DWORD)c.r << 16) | ((DWORD)c.g << 8) | c.b;  // straight alpha
+        ip[y * S + x] = ((DWORD)a << 24) | ((DWORD)c.r << 16) | ((DWORD)c.g << 8) | c.b;
     };
     if (bx1 >= 0) {
         int gw = bx1 - bx0 + 1, gh = by1 - by0 + 1;
-        int ox = (S - gw) / 2, oy = (textH - gh) / 2;
+        int ox = (S - gw) / 2, oy = (S - gh) / 2;
+        int fill = fillPct < 0 ? gw : std::max(fillPct > 0 ? 1 : 0, (fillPct * gw + 50) / 100);
         for (int y = 0; y < gh; y++)
-            for (int x = 0; x < gw; x++)
-                put(ox + x, oy + y, textColor, sp[(by0 + y) * W + (bx0 + x)] & 0xFF);
+            for (int x = 0; x < gw; x++) {
+                int a = sp[(by0 + y) * W + (bx0 + x)] & 0xFF;
+                if (!a) continue;
+                if (x < fill) put(ox + x, oy + y, tint, a);
+                else put(ox + x, oy + y, g_lightTaskbar ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 }, a * 60 / 100);
+            }
     }
-    // level bar: faint track + filled part
-    int fill = barPct < 0 ? 0 : std::max(barPct > 0 ? 1 : 0, (barPct * S + 50) / 100);
-    for (int y = S - barH; y < S; y++)
-        for (int x = 0; x < S; x++) {
-            if (x < fill) put(x, y, barColor, 255);
-            else put(x, y, g_lightTaskbar ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 }, 70);
-        }
 
     SelectObject(dc, oldBmp);
     DeleteObject(scratch);
@@ -560,11 +517,19 @@ HICON RenderIcon(const std::wstring& text, int barPct, Rgb textColor, Rgb barCol
         SelectObject(mdc, o);
         DeleteDC(mdc);
     }
-    ICONINFO ii{ TRUE, 0, 0, mask, color };
+    ICONINFO ii{ TRUE, 0, 0, mask, colorBmp };
     HICON icon = CreateIconIndirect(&ii);
     DeleteObject(mask);
-    DeleteObject(color);
+    DeleteObject(colorBmp);
     return icon;
+}
+
+HICON RenderIcon(const std::wstring& text, int barPct, Rgb textColor, Rgb barColor, bool dim) {
+    if (text == L"-" || text == L"?") return RenderGlyph(icons::G().batteryUnknown, textColor, dim);
+    if (text == L"\u00D7") return RenderGlyph(icons::G().offline, textColor, dim);
+    // battery_0_bar .. battery_6_bar are glyphs from the icon set: seven charge levels, no hand drawing.
+    int level = barPct < 0 ? 0 : std::min(6, std::max(0, (barPct * 6 + 50) / 100));
+    return RenderGlyph(icons::G().batteryBars[level], barColor, dim);
 }
 
 Rgb Foreground() { return g_lightTaskbar ? Rgb{ 0, 0, 0 } : Rgb{ 255, 255, 255 }; }
@@ -1011,6 +976,17 @@ void SetShowPercentSign(bool on) {
     widget::SetShowPercentSign(on);
 }
 
+void ApplyTextStyle(const widget::TextStyle& style) {
+    g_textStyle = style;
+    SaveTextFont(style.face);
+    SaveIntSetting(L"TextSizePx", style.size);
+    SaveIntSetting(L"TextWeight", style.weight);
+    SaveIntSetting(L"TextIconSizePx", style.iconSize);
+    SaveIntSetting(L"TextIconGapPx", style.iconGap);
+    SaveIntSetting(L"TextItemGapPx", style.itemGap);
+    widget::SetTextStyle(style);
+}
+
 void SetStacked(bool on) {
     g_stacked = on;
     SaveStacked(on);
@@ -1137,241 +1113,367 @@ void MoveEntry(const std::wstring& key, int dir) {
 }
 
 void ShowMenu() {
-    ApplyMenuTheme(g_lightTaskbar);
-    MenuIcons icons(g_lightTaskbar);  // freed after the menu closes
-    HMENU m = CreatePopupMenu();
+    using Item = popup_menu::Item;
+    auto raw = [](std::wstring text, UINT_PTR id) {
+        Item it;
+        it.text = std::move(text);
+        it.id = id;
+        return it;
+    };
+    auto sep = [] {
+        Item it;
+        it.kind = Item::Kind::Separator;
+        return it;
+    };
+    auto dot = [](Item& it) {  // one of an exclusive group
+        it.radio = true;
+        return it;
+    };
+    std::vector<Item> top;
     std::vector<std::wstring> keys;  // device index -> device key; menu id ID_DEVICE_FIRST + index * DEV_STRIDE + command
     std::vector<TrayEntry*> all = OrderedEntries(false), shown = OrderedEntries(true);
-    if (all.empty()) AppendMenuW(m, MF_STRING | MF_GRAYED, 0, T(L"No devices with battery info found"));
-    else AppendMenuW(m, MF_STRING | MF_GRAYED, 0, T(L"Point at a device to show, hide or move it"));
+    if (all.empty()) {
+        Item none = raw(T(L"No devices with battery info found"), 0);
+        none.disabled = true;
+        top.push_back(none);
+        top.push_back(sep());
+    }
     for (TrayEntry* e : all) {
         const std::wstring& k = e->st.key;
         UINT base = ID_DEVICE_FIRST + (UINT)keys.size() * DEV_STRIDE;
         auto pos = std::find(shown.begin(), shown.end(), e);
         bool canLeft = pos != shown.end() && pos != shown.begin();
         bool canRight = pos != shown.end() && pos + 1 != shown.end();
-        HMENU sub = CreatePopupMenu();
-        if (!e->st.via.empty()) {  // the connection, moved off the device line (PR #3292)
-            const auto connection = TF(L"Connection: {connection}", { { L"connection", T(e->st.via) } });
-            AppendMenuW(sub, MF_STRING | MF_GRAYED, 0, connection.c_str());
-            AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        }
-        AppendMenuW(sub, MF_STRING | (IsHidden(k) ? 0 : MF_CHECKED), base + DEV_TOGGLE,
-                    g_wantWidget ? T(L"Show on the taskbar") : T(L"Show in the tray"));
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(sub, MF_STRING | (canLeft ? 0 : MF_GRAYED), base + DEV_LEFT, g_wantWidget ? T(L"Move left") : T(L"Move up"));
-        AppendMenuW(sub, MF_STRING | (canRight ? 0 : MF_GRAYED), base + DEV_RIGHT, g_wantWidget ? T(L"Move right") : T(L"Move down"));
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(sub, MF_STRING, base + DEV_RENAME, T(L"Rename device..."));
-        icons.SetLast(sub, 0xE8AC);  // Rename
-        AppendMenuW(sub, MF_STRING | (g_aliases.count(k) ? 0 : MF_GRAYED),
-                    base + DEV_RESET_NAME, T(L"Reset to original name"));
-        HMENU alertMenu = CreatePopupMenu();
+        std::vector<Item> sub;
+        Item toggle = raw(g_wantWidget ? T(L"Show on the taskbar") : T(L"Show in the tray"), base + DEV_TOGGLE);
+        toggle.checked = !IsHidden(k);
+        sub.push_back(toggle);
+        Item left = raw(g_wantWidget ? T(L"Move left") : T(L"Move up"), base + DEV_LEFT);
+        left.disabled = !canLeft;
+        sub.push_back(left);
+        Item right = raw(g_wantWidget ? T(L"Move right") : T(L"Move down"), base + DEV_RIGHT);
+        right.disabled = !canRight;
+        sub.push_back(right);
+        sub.push_back(sep());
+        Item rename = raw(T(L"Rename device..."), base + DEV_RENAME);
+
+        sub.push_back(rename);
+        Item reset = raw(T(L"Reset to original name"), base + DEV_RESET_NAME);
+        reset.disabled = !g_aliases.count(k);
+        sub.push_back(reset);
+        sub.push_back(sep());
+
         int selectedThreshold = alerts::OverrideFor(g_alertOverrides, k);
-        AppendMenuW(alertMenu, MF_STRING | (selectedThreshold == alerts::kUseDefault ? MF_CHECKED : 0),
-                    base + DEV_ALERT_DEFAULT, T(L"Use default (15%)"));
-        AppendMenuW(alertMenu, MF_STRING | (selectedThreshold == alerts::kDisabled ? MF_CHECKED : 0),
-                    base + DEV_ALERT_OFF, T(L"Disable notifications"));
-        AppendMenuW(alertMenu, MF_SEPARATOR, 0, nullptr);
+        std::vector<Item> alertItems;
         for (int i = 0; i < alerts::kThresholdCount; ++i) {
             int level = alerts::kThresholds[i];
-            std::wstring label = std::to_wstring(level) + L"%";
-            AppendMenuW(alertMenu, MF_STRING | (selectedThreshold == level ? MF_CHECKED : 0),
-                        base + DEV_ALERT_FIRST + i, label.c_str());
+            Item th = raw(std::to_wstring(level) + L"%", base + DEV_ALERT_FIRST + i);
+            th.checked = selectedThreshold == level;
+            alertItems.push_back(dot(th));
         }
-        AppendMenuW(sub, MF_POPUP, (UINT_PTR)alertMenu, T(L"Battery alerts"));
-        icons.SetLast(sub, 0xEA8F);  // Ringer
-        AppendMenuW(sub, MF_STRING, base + DEV_HISTORY, T(L"Battery history..."));
-        icons.SetLast(sub, 0xE81C);  // History
-        std::wstring line = DisplayName(*e) + L"  ·  " + StatusText(*e);
-        AppendMenuW(m, MF_POPUP | (IsHidden(k) ? 0 : MF_CHECKED), (UINT_PTR)sub, line.c_str());
-        icons.SetLast(m, widget::DeviceGlyph(e->st.kind, e->st.via == L"Bluetooth"));
+        alertItems.push_back(sep());
+        Item useDefault = raw(T(L"Use default (15%)"), base + DEV_ALERT_DEFAULT);
+        useDefault.checked = selectedThreshold == alerts::kUseDefault;
+        alertItems.push_back(dot(useDefault));
+        Item alertsOff = raw(T(L"Disable notifications"), base + DEV_ALERT_OFF);
+        alertsOff.checked = selectedThreshold == alerts::kDisabled;
+        alertItems.push_back(dot(alertsOff));
+        Item alertsItem = raw(T(L"Battery alerts"), 0);
+
+        alertsItem.children = std::move(alertItems);
+        sub.push_back(alertsItem);
+        Item history = raw(T(L"Battery history..."), base + DEV_HISTORY);
+
+        sub.push_back(history);
+
+        Item entry = raw(DisplayName(*e) + L"  -  " + StatusText(*e), 0);
+
+        entry.children = std::move(sub);
+        top.push_back(std::move(entry));
         keys.push_back(k);
     }
-    if (!all.empty()) AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_STRING | (g_recordHistory ? MF_CHECKED : 0), ID_RECORD_HISTORY, T(L"Record battery history"));
+    // Categories, top to bottom: the devices, the action on that list, battery behaviour, the
+    // interface, then about/help, and Exit alone at the bottom.
+    if (!all.empty()) top.push_back(sep());
+    Item refresh = raw(T(L"Refresh now"), ID_REFRESH);
+    top.push_back(refresh);
+    top.push_back(sep());
+    Item history = raw(T(L"Record battery history"), ID_RECORD_HISTORY);
+    history.checked = g_recordHistory;
+    top.push_back(history);
     {
-        HMENU sub = CreatePopupMenu();
-        AppendMenuW(sub, MF_STRING, ID_LIMIT_OFF, T(L"Off"));
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
+        std::vector<Item> sub;
         UINT checked = ID_LIMIT_OFF;
-        for (UINT i = 0; i < (UINT)alerts::kChargeLimitCount; i++) {
-            AppendMenuW(sub, MF_STRING, ID_LIMIT_FIRST + i, (std::to_wstring(alerts::kChargeLimits[i]) + L"%").c_str());
+        for (UINT i = 0; i < (UINT)alerts::kChargeLimitCount; i++)
             if (g_chargeLimit == alerts::kChargeLimits[i]) checked = ID_LIMIT_FIRST + i;
+        for (UINT i = 0; i < (UINT)alerts::kChargeLimitCount; i++) {
+            Item it = raw(std::to_wstring(alerts::kChargeLimits[i]) + L"%", ID_LIMIT_FIRST + i);
+            it.checked = checked == ID_LIMIT_FIRST + i;
+            sub.push_back(dot(it));
         }
-        CheckMenuRadioItem(sub, ID_LIMIT_OFF, ID_LIMIT_FIRST + alerts::kChargeLimitCount - 1, checked, MF_BYCOMMAND);
-        AppendMenuW(m, MF_POPUP, (UINT_PTR)sub, T(L"Notify when charged to (saves the battery)"));
+        sub.push_back(sep());
+        Item off = raw(T(L"Off"), ID_LIMIT_OFF);
+        off.checked = checked == ID_LIMIT_OFF;
+        sub.push_back(dot(off));
+        Item item = raw(T(L"Notify when charged to"), 0);
+        item.children = std::move(sub);
+        top.push_back(item);
     }
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    // Display settings (PR #3292): how and where the devices are shown, in one submenu.
-    HMENU display = CreatePopupMenu();
-    AppendMenuW(display, MF_STRING | (g_wantWidget ? MF_CHECKED : 0), ID_MODE_WIDGET, T(L"Show on the taskbar (icon + percentage)"));
-    AppendMenuW(display, MF_STRING | (!g_wantWidget ? MF_CHECKED : 0), ID_MODE_TRAY, T(L"Show as tray icons"));
-    CheckMenuRadioItem(display, ID_MODE_WIDGET, ID_MODE_TRAY, g_wantWidget ? ID_MODE_WIDGET : ID_MODE_TRAY, MF_BYCOMMAND);
-    AppendMenuW(display, MF_SEPARATOR, 0, nullptr);
-    UINT bgFlags = MF_STRING | (g_widgetBackground ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED);
-    AppendMenuW(display, bgFlags, ID_WIDGET_BACKGROUND, T(L"Background behind taskbar text (for transparent taskbars)"));
-    AppendMenuW(display, MF_STRING | (g_stacked ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_STACKED, T(L"Icons above percentages (narrower)"));
-    AppendMenuW(display, MF_STRING | (g_showPercentSign ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_PERCENT_SIGN,
-                T(L"Show percent sign (%)"));
-    AppendMenuW(display, MF_STRING | (g_ringStyle ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_RING_STYLE,
-                T(L"Ring style (icon inside a battery ring)"));
-    AppendMenuW(display, MF_STRING | (g_connectionIcons ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_CONNECTION_ICONS,
-                T(L"Mark devices on a 2.4 GHz receiver"));
     {
-        HMENU sub = CreatePopupMenu();
-        UINT f = MF_STRING | (g_wantWidget ? 0 : MF_GRAYED);
+        std::vector<Item> sub;
+        const UINT count = ARRAYSIZE(POLL_SECONDS);
+        for (UINT i = 0; i < count; i++) {
+            DWORD secs = POLL_SECONDS[i];
+            std::wstring label = secs < 60 ? TF(L"{seconds} s", { { L"seconds", std::to_wstring(secs) } })
+                                          : TF(L"{minutes} min", { { L"minutes", std::to_wstring(secs / 60) } });
+            Item it = raw(label, ID_POLL_FIRST + i);
+            it.checked = secs * 1000 == g_pollIntervalMs;
+            sub.push_back(dot(it));
+        }
+        Item item = raw(T(L"Check battery every"), 0);
+
+        item.children = std::move(sub);
+        top.push_back(item);
+    }
+    top.push_back(sep());
+    // Display settings (PR #3292): how and where the devices are shown, in one submenu.
+    std::vector<Item> display;
+    {
+        // Taskbar widget or tray icons: one choice, so it lives one level down like the other groups.
+        std::vector<Item> modeSub;
+        Item widgetMode = raw(T(L"Show on the taskbar (icon + percentage)"), ID_MODE_WIDGET);
+        widgetMode.checked = g_wantWidget;
+        modeSub.push_back(dot(widgetMode));
+        Item trayMode = raw(T(L"Show as tray icons"), ID_MODE_TRAY);
+        trayMode.checked = !g_wantWidget;
+        modeSub.push_back(dot(trayMode));
+        Item empty = raw(T(L"Move to tray when no devices"), ID_TRAY_WHEN_EMPTY);
+        empty.checked = g_trayWhenEmpty;
+        empty.disabled = !g_wantWidget;
+        modeSub.push_back(empty);
+        // How that widget looks: colour, shape, background and unit, in the same submenu.
+        modeSub.push_back(sep());
+        Item stacked = raw(T(L"Icons above percentages (narrower)"), ID_STACKED);
+        stacked.checked = g_stacked;
+        stacked.disabled = !g_wantWidget;
+        modeSub.push_back(stacked);
+        Item bg = raw(T(L"Background behind taskbar text (for transparent taskbars)"), ID_WIDGET_BACKGROUND);
+        bg.checked = g_widgetBackground;
+        bg.disabled = !g_wantWidget;
+        modeSub.push_back(bg);
+        Item ring = raw(T(L"Ring style (icon inside a battery ring)"), ID_RING_STYLE);
+        ring.checked = g_ringStyle;
+        ring.disabled = !g_wantWidget;
+        modeSub.push_back(ring);
+        Item sign = raw(T(L"Show percent sign (%)"), ID_PERCENT_SIGN);
+        sign.checked = g_showPercentSign;
+        sign.disabled = !g_wantWidget;
+        modeSub.push_back(sign);
+        Item brand = raw(T(L"Brand colors (Razer green, Logitech blue, ...)"), ID_BRAND_COLORS);
+        brand.checked = g_brandColors;
+        modeSub.push_back(brand);
+        Item link = raw(T(L"Mark devices on a 2.4 GHz receiver"), ID_CONNECTION_ICONS);
+        link.checked = g_connectionIcons;
+        link.disabled = !g_wantWidget;
+        modeSub.push_back(link);
+        modeSub.push_back(sep());
+        modeSub.push_back(raw(T(L"Text style..."), ID_TEXT_STYLE));  // also styles the tray digits
+        Item mode = raw(T(L"Display style"), 0);
+        mode.children = std::move(modeSub);
+        display.push_back(mode);
+        display.push_back(sep());
+    }
+    {
+        std::vector<Item> sub;
         const UINT count = ARRAYSIZE(POSITION_OFFSETS);
         const int current = LoadTaskbarOffset();
         UINT checked = ID_POSITION_FIRST + count;
         for (UINT i = 0; i < count; i++) {
             int px = POSITION_OFFSETS[i];
-            std::wstring label = px ? TF(L"{px} px from the notification area", { { L"px", std::to_wstring(px) } })
-                                    : T(L"Next to the notification area");
-            AppendMenuW(sub, f, ID_POSITION_FIRST + i, label.c_str());
+            Item it = raw(px ? TF(L"{px} px from the notification area", { { L"px", std::to_wstring(px) } })
+                             : T(L"Next to the notification area"),
+                          ID_POSITION_FIRST + i);
+            it.checked = px == current;
+            it.disabled = !g_wantWidget;
+            sub.push_back(dot(it));
             if (px == current) checked = ID_POSITION_FIRST + i;
         }
         // Any other value (typed in, or set by hand in the registry) shows as the custom entry.
         std::wstring custom = checked == ID_POSITION_FIRST + count
                                   ? TF(L"Custom ({px} px)...", { { L"px", std::to_wstring(current) } })
                                   : std::wstring(T(L"Custom..."));
-        AppendMenuW(sub, f, ID_POSITION_FIRST + count, custom.c_str());
-        CheckMenuRadioItem(sub, ID_POSITION_FIRST, ID_POSITION_FIRST + count, checked, MF_BYCOMMAND);
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(sub, f | (g_makeRoom ? MF_CHECKED : 0), ID_MAKE_ROOM, T(L"Make room for other taskbar widgets"));
-        AppendMenuW(display, MF_POPUP | (g_wantWidget ? 0 : MF_GRAYED), (UINT_PTR)sub, T(L"Position on the taskbar"));
+        Item it = raw(custom, ID_POSITION_FIRST + count);
+        it.checked = checked == ID_POSITION_FIRST + count;
+        it.disabled = !g_wantWidget;
+        sub.push_back(dot(it));
+        sub.push_back(sep());
+        Item room = raw(T(L"Make room for other taskbar widgets"), ID_MAKE_ROOM);
+        room.checked = g_makeRoom;
+        room.disabled = !g_wantWidget;
+        sub.push_back(room);
+        sub.push_back(sep());
+        Item farLeft = raw(T(L"At the left end of the taskbar"), ID_FAR_LEFT);
+        farLeft.checked = g_farLeft;
+        farLeft.disabled = !g_wantWidget;
+        sub.push_back(farLeft);
+        Item before = raw(T(L"Just before the taskbar apps"), ID_BEFORE_APPS);
+        before.checked = g_beforeApps;
+        before.disabled = !g_wantWidget;
+        sub.push_back(before);
+        Item item = raw(T(L"Position on the taskbar"), 0);
+        item.children = std::move(sub);
+        item.disabled = !g_wantWidget;
+        display.push_back(item);
     }
     // Left / right taskbar: choose where the column sits.
     if (widget::Vertical()) {
-        HMENU sub = CreatePopupMenu();
-        AppendMenuW(sub, MF_STRING, ID_PLACE_AUTO, T(L"Automatic (keeps clear of app icons)"));
-        AppendMenuW(sub, MF_STRING, ID_PLACE_TOP, T(L"Top of the taskbar"));
-        AppendMenuW(sub, MF_STRING, ID_PLACE_TRAY, T(L"Above the notification area"));
-        AppendMenuW(sub, MF_STRING, ID_PLACE_BOTTOM,
-                    T(L"Bottom of the taskbar (moves the taskbar icons up, Windows 11)"));
-        CheckMenuRadioItem(sub, ID_PLACE_AUTO, ID_PLACE_BOTTOM,
-                           g_verticalPlace == widget::VerticalPlace::Top ? ID_PLACE_TOP
-                           : g_verticalPlace == widget::VerticalPlace::AboveTray ? ID_PLACE_TRAY
-                           : g_verticalPlace == widget::VerticalPlace::Bottom ? ID_PLACE_BOTTOM : ID_PLACE_AUTO,
-                           MF_BYCOMMAND);
-        AppendMenuW(display, MF_POPUP, (UINT_PTR)sub, T(L"Position on a vertical taskbar"));
+        std::vector<Item> sub;
+        const UINT checked = g_verticalPlace == widget::VerticalPlace::Top        ? ID_PLACE_TOP
+                             : g_verticalPlace == widget::VerticalPlace::AboveTray ? ID_PLACE_TRAY
+                             : g_verticalPlace == widget::VerticalPlace::Bottom    ? ID_PLACE_BOTTOM
+                                                                                   : ID_PLACE_AUTO;
+        for (UINT id : { (UINT)ID_PLACE_AUTO, (UINT)ID_PLACE_TOP, (UINT)ID_PLACE_TRAY, (UINT)ID_PLACE_BOTTOM }) {
+            const wchar_t* label = id == ID_PLACE_AUTO    ? T(L"Automatic (keeps clear of app icons)")
+                                   : id == ID_PLACE_TOP   ? T(L"Top of the taskbar")
+                                   : id == ID_PLACE_TRAY  ? T(L"Above the notification area")
+                                                          : T(L"Bottom of the taskbar (moves the taskbar icons up, Windows 11)");
+            Item it = raw(label, id);
+            it.checked = id == checked;
+            sub.push_back(dot(it));
+        }
+        Item item = raw(T(L"Position on a vertical taskbar"), 0);
+        item.children = std::move(sub);
+        display.push_back(item);
     }
-    AppendMenuW(display, MF_STRING | (g_farLeft ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_FAR_LEFT, T(L"At the left end of the taskbar"));
-    AppendMenuW(display, MF_STRING | (g_beforeApps ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED), ID_BEFORE_APPS,
-                T(L"Just before the taskbar apps"));
     // With more than one monitor: choose which taskbars show the widget (all, main only, or one monitor).
     auto monitors = widget::OtherMonitors();
     if (monitors.size() > 31) monitors.resize(31);
     if (!monitors.empty()) {
-        HMENU sub = CreatePopupMenu();
-        UINT f = MF_STRING | (g_wantWidget ? 0 : MF_GRAYED);
-        AppendMenuW(sub, f, ID_MONITOR_ALL, T(L"All monitors"));
-        AppendMenuW(sub, f, ID_MONITOR_MAIN, T(L"Main monitor only"));
+        std::vector<Item> sub;
         UINT checked = g_widgetMonitor == L"main" ? ID_MONITOR_MAIN : ID_MONITOR_ALL;
         bool found = g_widgetMonitor == L"all" || g_widgetMonitor == L"main";
         std::vector<std::wstring> ids;
         for (const auto& mo : monitors) ids.push_back(mo.id);
         int chosen = found ? -1 : widget::FindMonitor(ids, g_widgetMonitor);
+        Item allItem = raw(T(L"All monitors"), ID_MONITOR_ALL);
+        allItem.checked = checked == ID_MONITOR_ALL;
+        allItem.disabled = !g_wantWidget;
+        sub.push_back(dot(allItem));
+        Item mainItem = raw(T(L"Main monitor only"), ID_MONITOR_MAIN);
+        mainItem.checked = checked == ID_MONITOR_MAIN;
+        mainItem.disabled = !g_wantWidget;
+        sub.push_back(dot(mainItem));
         for (UINT i = 0; i < monitors.size(); i++) {
-            AppendMenuW(sub, f, ID_MONITOR_FIRST + i, TF(L"{monitor} only", { { L"monitor", monitors[i].label } }).c_str());
-            if ((int)i == chosen) { checked = ID_MONITOR_FIRST + i; found = true; }
+            Item it = raw(TF(L"{monitor} only", { { L"monitor", monitors[i].label } }), ID_MONITOR_FIRST + i);
+            if ((int)i == chosen) {
+                checked = ID_MONITOR_FIRST + i;
+                found = true;
+            }
+            it.checked = (int)i == chosen;
+            it.disabled = !g_wantWidget;
+            sub.push_back(dot(it));
         }
         if (!found) {  // the chosen monitor is unplugged: the main taskbar shows the widget meanwhile
-            AppendMenuW(sub, MF_STRING | MF_GRAYED, ID_MONITOR_FIRST + 31, T(L"Chosen monitor (not connected, shown on main)"));
+            Item it = raw(T(L"Chosen monitor (not connected, shown on main)"), ID_MONITOR_FIRST + 31);
+            it.disabled = true;
+            it.checked = true;
+            sub.push_back(dot(it));
             checked = ID_MONITOR_FIRST + 31;
         }
-        CheckMenuRadioItem(sub, ID_MONITOR_ALL, ID_MONITOR_FIRST + 31, checked, MF_BYCOMMAND);
-        AppendMenuW(display, MF_POPUP | (g_wantWidget ? 0 : MF_GRAYED), (UINT_PTR)sub, T(L"Show the widget on"));
-        icons.SetLast(display, 0xE7F4);  // TVMonitor
+        Item item = raw(T(L"Show the widget on"), 0);
+
+        item.children = std::move(sub);
+        item.disabled = !g_wantWidget;
+        display.push_back(item);
     }
-    AppendMenuW(display, MF_STRING | (g_brandColors ? MF_CHECKED : 0), ID_BRAND_COLORS, T(L"Brand colors (Razer green, Logitech blue, ...)"));
-    AppendMenuW(display, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(display, MF_STRING | (g_hideLastKnown ? MF_CHECKED : 0), ID_HIDE_LAST_KNOWN, T(L"Hide last known / asleep devices"));
-    AppendMenuW(display, MF_STRING | (g_keepMouseLastKnown ? MF_CHECKED : 0) | (g_hideLastKnown ? 0 : MF_GRAYED),
-                ID_KEEP_MOUSE_LAST_KNOWN, T(L"Keep last known battery for mice"));
-    UINT emptyFlags = MF_STRING | (g_trayWhenEmpty ? MF_CHECKED : 0) | (g_wantWidget ? 0 : MF_GRAYED);
-    AppendMenuW(display, emptyFlags, ID_TRAY_WHEN_EMPTY, T(L"Move to tray when no devices"));
-    AppendMenuW(display, MF_STRING | (g_showDisconnectedDevices ? MF_CHECKED : 0), ID_SHOW_DISCONNECTED, T(L"Show disconnected devices"));
-    AppendMenuW(display, MF_STRING | (g_dimSleeping ? MF_CHECKED : 0), ID_DIM_SLEEPING, T(L"Dim sleeping devices"));
-    AppendMenuW(m, MF_POPUP, (UINT_PTR)display, T(L"Display settings"));
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    {
+        display.push_back(sep());
+        Item hide = raw(T(L"Hide last known / asleep devices"), ID_HIDE_LAST_KNOWN);
+        hide.checked = g_hideLastKnown;
+        display.push_back(hide);
+        Item keep = raw(T(L"Keep last known battery for mice"), ID_KEEP_MOUSE_LAST_KNOWN);
+        keep.checked = g_keepMouseLastKnown;
+        keep.disabled = !g_hideLastKnown;
+        display.push_back(keep);
+        display.push_back(sep());
+        Item disconnected = raw(T(L"Show disconnected devices"), ID_SHOW_DISCONNECTED);
+        disconnected.checked = g_showDisconnectedDevices;
+        display.push_back(disconnected);
+        Item dim = raw(T(L"Dim sleeping devices"), ID_DIM_SLEEPING);
+        dim.checked = g_dimSleeping;
+        display.push_back(dim);
+    }
+    {
+        Item item = raw(T(L"Display settings"), 0);
+        item.children = std::move(display);
+        top.push_back(item);
+    }
+    top.push_back(sep());
     // Language: automatic, every built-in or user-added language (in its own name), and a way to add one.
     i18n::Init();  // picks up language files added since the last time
     auto languages = i18n::Available();
     if (languages.size() > 64) languages.resize(64);
-    HBITMAP russianFlag = LoadBitmapW(g_inst, L"FLAG_RU");  // PR #1754
     {
-        HMENU sub = CreatePopupMenu();
-        AppendMenuW(sub, MF_STRING, ID_LANG_AUTO, T(L"Automatic (Windows language)"));
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        UINT checked = ID_LANG_AUTO;
+        std::vector<Item> sub;
+        Item autoItem = raw(T(L"Automatic (Windows language)"), ID_LANG_AUTO);
+        autoItem.checked = i18n::Choice().empty();
+        sub.push_back(dot(autoItem));
+        sub.push_back(sep());
         for (UINT i = 0; i < languages.size(); i++) {
-            AppendMenuW(sub, MF_STRING, ID_LANG_FIRST + i, languages[i].name.c_str());
-            if (russianFlag && _wcsicmp(languages[i].code.c_str(), L"ru") == 0) {
-                MENUITEMINFOW item{ sizeof(item) };
-                item.fMask = MIIM_BITMAP;
-                item.hbmpItem = russianFlag;
-                SetMenuItemInfoW(sub, ID_LANG_FIRST + i, FALSE, &item);
-            }
-            if (!i18n::Choice().empty() && _wcsicmp(languages[i].code.c_str(), i18n::Choice().c_str()) == 0) checked = ID_LANG_FIRST + i;
+            Item it = raw(languages[i].name, ID_LANG_FIRST + i);
+            bool chosen = !i18n::Choice().empty() && _wcsicmp(languages[i].code.c_str(), i18n::Choice().c_str()) == 0;
+            it.checked = chosen;
+            sub.push_back(dot(it));
         }
-        CheckMenuRadioItem(sub, ID_LANG_AUTO, ID_LANG_FIRST + 63, checked, MF_BYCOMMAND);
-        AppendMenuW(sub, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(sub, MF_STRING, ID_LANG_ADD, T(L"Add your own language..."));
-        AppendMenuW(m, MF_POPUP, (UINT_PTR)sub, T(L"Language"));
-        icons.SetLast(m, 0xE774);  // Globe
+        sub.push_back(sep());
+        sub.push_back(raw(T(L"Add your own language..."), ID_LANG_ADD));
+        Item item = raw(T(L"Language"), 0);
+
+        item.children = std::move(sub);
+        top.push_back(item);
     }
     {
-        HMENU sub = CreatePopupMenu();
-        const UINT count = ARRAYSIZE(POLL_SECONDS);
-        UINT checked = 0;
-        for (UINT i = 0; i < count; i++) {
-            DWORD s = POLL_SECONDS[i];
-            std::wstring label = s < 60 ? TF(L"{seconds} s", { { L"seconds", std::to_wstring(s) } })
-                                        : TF(L"{minutes} min", { { L"minutes", std::to_wstring(s / 60) } });
-            AppendMenuW(sub, MF_STRING, ID_POLL_FIRST + i, label.c_str());
-            if (s * 1000 == g_pollIntervalMs) checked = ID_POLL_FIRST + i;
-        }
-        if (checked) CheckMenuRadioItem(sub, ID_POLL_FIRST, ID_POLL_FIRST + count - 1, checked, MF_BYCOMMAND);
-        AppendMenuW(m, MF_POPUP, (UINT_PTR)sub, T(L"Check battery every"));
-        icons.SetLast(m, 0xE916);  // Stopwatch
+        // Still the interface group: starting with Windows belongs next to the language choice.
+        Item autostart = raw(T(L"Start with Windows"), ID_AUTOSTART);
+        autostart.checked = AutostartEnabled();
+        top.push_back(autostart);
+        top.push_back(sep());
+        // About and help: updates first, then the two ways to help the project.
+        Item update = raw(updates::MenuLabel(), ID_UPDATE);
+        update.disabled = updates::Busy();
+        top.push_back(update);
+        Item autoUpdate = raw(T(L"Automatically check for updates"), ID_AUTO_UPDATE);
+        autoUpdate.checked = updates::AutomaticEnabled();
+        autoUpdate.disabled = !updates::Supported();
+        top.push_back(autoUpdate);
+        Item report = raw(T(L"Request support for a device..."), ID_REPORT);
+        top.push_back(report);
+        Item support = raw(T(L"Support the project..."), ID_SUPPORT);
+        top.push_back(support);
+        top.push_back(sep());
+        Item exit = raw(T(L"Exit"), ID_EXIT);
+        top.push_back(exit);
     }
-    AppendMenuW(m, MF_STRING, ID_REFRESH, T(L"Refresh now"));
-    AppendMenuW(m, MF_STRING | (AutostartEnabled() ? MF_CHECKED : 0), ID_AUTOSTART, T(L"Start with Windows"));
-    AppendMenuW(m, MF_STRING, ID_REPORT, T(L"Request support for a device..."));
-    AppendMenuW(m, MF_STRING, ID_SUPPORT, T(L"Support the project..."));
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_STRING | (updates::Busy() ? MF_GRAYED : 0), ID_UPDATE, updates::MenuLabel().c_str());
-    UINT updateFlags = MF_STRING | (updates::AutomaticEnabled() ? MF_CHECKED : 0) |
-                       (updates::Supported() ? 0 : MF_GRAYED);
-    AppendMenuW(m, updateFlags, ID_AUTO_UPDATE, T(L"Automatically check for updates"));
-    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m, MF_STRING, ID_EXIT, T(L"Exit"));
-    icons.Set(m, ID_REFRESH, false, 0xE72C);         // Refresh
-    icons.Set(m, ID_REPORT, false, 0xE897);          // Help
-    icons.Set(m, ID_SUPPORT, false, 0xEB51);         // Heart
-    icons.Set(m, ID_UPDATE, false, 0xE777);          // UpdateRestore
-    icons.Set(m, ID_EXIT, false, 0xE711);            // Cancel
+
     POINT pt;
     GetCursorPos(&pt);
     SetForegroundWindow(g_hwnd);
-    // Opened from the taskbar, the menu must not overlap it: Windows only keeps a menu inside the monitor,
-    // so its last items (Exit) ended up under the taskbar. Excluding the taskbar's rectangle makes Windows
-    // open the menu above it (below / beside it for a top or side taskbar).
-    TPMPARAMS tpm{ sizeof(tpm) };
+    // Opened from the taskbar, the menu keeps clear of it: the last items (Exit) would otherwise end up
+    // under the taskbar.
     HWND under = GetAncestor(WindowFromPoint(pt), GA_ROOT);
     wchar_t cls[32] = {};
     if (under) GetClassNameW(under, cls, ARRAYSIZE(cls));
     bool fromTaskbar = !wcscmp(cls, L"Shell_TrayWnd") || !wcscmp(cls, L"Shell_SecondaryTrayWnd");
-    if (fromTaskbar) GetWindowRect(under, &tpm.rcExclude);
-    bool sideBar = fromTaskbar && tpm.rcExclude.bottom - tpm.rcExclude.top > tpm.rcExclude.right - tpm.rcExclude.left;
-    UINT cmd = TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | (sideBar ? TPM_HORIZONTAL : TPM_VERTICAL) |
-                                       (i18n::Rtl() ? TPM_LAYOUTRTL : 0),
-                                pt.x, pt.y, g_hwnd, fromTaskbar ? &tpm : nullptr);
-    PostMessageW(g_hwnd, WM_NULL, 0, 0);
-    DestroyMenu(m);
-    if (russianFlag) DeleteObject(russianFlag);
+    popup_menu::Options opt;
+    opt.light = g_lightTaskbar;
+    opt.rtl = i18n::Rtl();
+    if (fromTaskbar) {
+        opt.hasExclude = true;
+        GetWindowRect(under, &opt.exclude);
+    }
+    UINT_PTR cmd = 0;
+    bool shownMenu = popup_menu::Show(g_hwnd, pt, top, opt, cmd);
+    if (!shownMenu) return;
     memory_trim::Soon();
     switch (cmd) {
         case ID_REFRESH: SetEvent(g_refreshEvt); break;
@@ -1391,6 +1493,11 @@ void ShowMenu() {
         case ID_BRAND_COLORS: SetBrandColors(!g_brandColors); break;
         case ID_STACKED: SetStacked(!g_stacked); break;
         case ID_PERCENT_SIGN: SetShowPercentSign(!g_showPercentSign); break;
+        case ID_TEXT_STYLE: {
+            widget::TextStyle style = g_textStyle;
+            if (PromptTextStyle(g_hwnd, style, style)) ApplyTextStyle(style);
+            break;
+        }
         case ID_RING_STYLE: SetRingStyle(!g_ringStyle); break;
         case ID_CONNECTION_ICONS: SetConnectionIcons(!g_connectionIcons); break;
         case ID_MAKE_ROOM: SetMakeRoom(!g_makeRoom); break;
@@ -1851,6 +1958,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     }
     g_inst = inst;
     g_demo = cmdLine && wcsstr(cmdLine, L"--demo");
+    icons::Init();  // register the embedded Material Icons font before drawing any icon
 
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\WirelessBatteryTray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
@@ -1900,6 +2008,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     widget::SetStacked(g_stacked);
     g_showPercentSign = LoadShowPercentSign();
     widget::SetShowPercentSign(g_showPercentSign);
+    g_textStyle = LoadTextStyle();
+    widget::SetTextStyle(g_textStyle);
     g_ringStyle = LoadRingStyle();
     widget::SetRingStyle(g_ringStyle);
     g_connectionIcons = LoadConnectionIcons();

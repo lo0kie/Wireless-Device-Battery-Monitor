@@ -73,6 +73,7 @@ Could not save history changes. = 기록 변경 사항을 저장하지 못했습
 Hide last known / asleep devices = 이전 잔량만 있거나 절전 중인 기기 숨기기
 Show disconnected devices = 연결되지 않은 기기 표시
 Record battery history = 배터리 기록 저장
+Display style = 표시 스타일
 Show on the taskbar (icon + percentage) = 작업 표시줄에 표시 (아이콘과 백분율)
 Show as tray icons = 시스템 트레이 아이콘으로 표시
 Background behind taskbar text (for transparent taskbars) = 작업 표시줄의 글자 뒤에 배경 표시 (투명 작업 표시줄용)

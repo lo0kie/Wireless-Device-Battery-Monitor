@@ -20,6 +20,7 @@ Move up = הזז למעלה
 Move right = הזז ימינה
 Move down = הזז למטה
 Hide last known / asleep devices = הסתר התקנים במצב שינה או עם ערך אחרון ידוע
+Display style = סגנון תצוגה
 Show on the taskbar (icon + percentage) = הצג בשורת המשימות (סמל + אחוזים)
 Show as tray icons = הצג כסמלים במגש המערכת
 Background behind taskbar text (for transparent taskbars) = רקע מאחורי הטקסט בשורת המשימות (לשורת משימות שקופה)

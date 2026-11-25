@@ -71,9 +71,11 @@ void ForEachLine(const std::string& utf8, Fn fn) {
         std::wstring line = Trim(text.substr(pos, end - pos));
         pos = end + 1;
         if (line.empty() || line[0] == L'#') continue;
-        size_t eq = line.find(L" = ");
+        // "key = value", "key=value" and "key= value" all work: hand-edited language files often
+        // lose the spaces around '=', and a line should never be silently ignored for that reason.
+        size_t eq = line.find(L'=');
         if (eq == std::wstring::npos) continue;
-        fn(Trim(line.substr(0, eq)), Trim(line.substr(eq + 3)));
+        fn(Trim(line.substr(0, eq)), Trim(line.substr(eq + 1)));
     }
 }
 

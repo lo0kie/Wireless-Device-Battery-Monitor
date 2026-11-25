@@ -5,29 +5,44 @@ VERSION  ?= 0.0.0
 CHANNEL  ?= dev
 .DEFAULT_GOAL := BatteryHub.exe
 CXXFLAGS ?= -std=c++17 -Os -Wall -Wno-missing-field-initializers -ffunction-sections -fdata-sections \
-            -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00
+            -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -MMD -MP
 LDFLAGS  ?= -municode -mwindows -static -s -Wl,--gc-sections
-LIBS     := -lhid -lsetupapi -lcfgmgr32 -lole32 -loleaut32 -lcomctl32 -lgdi32 -lruntimeobject -lws2_32 -lwinhttp -lbcrypt -lversion -lbluetoothapis
+LIBS     := -ld2d1 -ldwrite -lhid -lsetupapi -lcfgmgr32 -lole32 -loleaut32 -lcomctl32 -lgdi32 -lruntimeobject -lws2_32 -lwinhttp -lbcrypt -lversion -lbluetoothapis
 
 SRC := $(wildcard src/*.cpp) $(wildcard src/drivers/*.cpp)
 OBJ := $(patsubst src/%.cpp,build/%.o,$(SRC)) build/app_res.o
+DEP := $(OBJ:.o=.d)
 
 BatteryHub.exe: $(OBJ)
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LIBS)
 
-build/%.o: src/%.cpp $(wildcard src/*.h src/drivers/*.h) build/version.h
+# -MMD -MP writes the real header dependencies next to each object, so touching one header rebuilds
+# only the sources that include it instead of the whole tree.
+build/%.o: src/%.cpp build/version.h
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -municode -c $< -o $@
 
-build/version.h: scripts/generate-version.ps1 FORCE
-	powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-version.ps1 -Version "$(VERSION)" -Channel "$(CHANNEL)"
+-include $(DEP)
+
+# The version only rewrites build/version.h when it actually changes: otherwise every build would
+# re-run windres and re-link the whole executable for nothing.
+build/.version: FORCE
+	@mkdir -p build
+	@printf '%s %s\n' "$(VERSION)" "$(CHANNEL)" > build/.version.new
+	@if cmp -s build/.version.new build/.version; then rm -f build/.version.new; \
+	 else powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-version.ps1 -Version "$(VERSION)" -Channel "$(CHANNEL)" \
+	      && mv build/.version.new build/.version; fi
+
+build/version.h: build/.version
+	@test -f $@ || powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/generate-version.ps1 -Version "$(VERSION)" -Channel "$(CHANNEL)"
+	@touch $@
 
 # Every lang/*.txt is a built-in UI language: joined into one resource, each after an "@file <name>" line.
 build/languages.txt: $(wildcard lang/*.txt)
 	@mkdir -p build
 	@printf '' > $@; for f in $^; do printf '@file %s\n' "$$(basename $$f .txt)" >> $@; cat "$$f" >> $@; printf '\n' >> $@; done
 
-build/app_res.o: res/app.rc res/app.manifest res/app.ico res/app_light.ico res/flag_ru.bmp build/languages.txt build/version.h
+build/app_res.o: res/app.rc res/app.manifest res/app.ico res/app_light.ico res/MaterialIconsOutlined-Regular.otf build/languages.txt build/version.h
 	@mkdir -p build
 	$(WINDRES) -i $< -o $@ --include-dir res --include-dir build
 

@@ -69,6 +69,7 @@ Could not save history changes. = No se han podido guardar los cambios en el his
 Hide last known / asleep devices = Ocultar dispositivos en reposo / último conocido
 Show disconnected devices = Mostrar dispositivos desconectados
 Record battery history = Registrar histórico de batería
+Display style = Estilo de visualización
 Show on the taskbar (icon + percentage) = Mostrar en la barra de tareas (icono + porcentaje)
 Show as tray icons = Mostrar como iconos en la bandeja
 Background behind taskbar text (for transparent taskbars) = Fondo detrás del texto de la barra de tareas (para barras transparentes)

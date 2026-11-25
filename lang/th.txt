@@ -69,6 +69,7 @@ Could not save history changes. = บันทึกการเปลี่ย�
 Hide last known / asleep devices = ซ่อนอุปกรณ์ที่มีเฉพาะค่าล่าสุดที่ทราบ / อยู่ในโหมดพัก
 Show disconnected devices = แสดงอุปกรณ์ที่ไม่ได้เชื่อมต่อ
 Record battery history = บันทึกประวัติแบตเตอรี่
+Display style = สไตล์การแสดงผล
 Show on the taskbar (icon + percentage) = แสดงบนแถบงาน (ไอคอน + เปอร์เซ็นต์)
 Show as tray icons = แสดงเป็นไอคอนในพื้นที่แจ้งเตือน
 Background behind taskbar text (for transparent taskbars) = พื้นหลังข้อความบนแถบงาน (สำหรับแถบงานโปร่งใส)

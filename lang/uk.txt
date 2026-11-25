@@ -24,6 +24,7 @@ Move up = Перемістити вгору
 Move right = Перемістити праворуч
 Move down = Перемістити вниз
 Hide last known / asleep devices = Приховати пристрої зі спливаючим/останнім відомим зарядом
+Display style = Стиль відображення
 Show on the taskbar (icon + percentage) = Показати на панелі завдань (іконка + відсотки)
 Show as tray icons = Показати як іконки в треї
 Background behind taskbar text (for transparent taskbars) = Фон за текстом на панелі завдань (для прозорих панелей)
