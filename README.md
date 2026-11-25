@@ -1,5 +1,10 @@
 # BatteryHub
 
+> **Unofficial modified build.** This is a fork of
+> [krisgfx9/Wireless-Device-Battery-Monitor](https://github.com/krisgfx9/Wireless-Device-Battery-Monitor),
+> not affiliated with or supported by the upstream author. Modified on 2026-11-25; what changed and
+> where the source is: [NOTICE.md](NOTICE.md).
+
 *Formerly **Wireless Battery**. Version 1.1.0 renamed the app; an update keeps your settings, startup choice and battery history.*
 
 [![Support me on Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/krisgfx)

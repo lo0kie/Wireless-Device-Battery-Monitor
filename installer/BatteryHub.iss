@@ -50,6 +50,8 @@ Source: "{#Root}\BatteryHub.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Root}\third_party\headsetcontrol\headsetcontrol.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Root}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "{#Root}\installer\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Root}\res\fonts\LICENSE-APACHE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Root}\NOTICE.md"; DestDir: "{app}"; DestName: "NOTICE.txt"; Flags: ignoreversion
 
 [InstallDelete]
 ; Before 1.1.0 the app was called Wireless Battery: remove its exe and Start menu shortcut on upgrade.
