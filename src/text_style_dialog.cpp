@@ -3,6 +3,7 @@
 #include "i18n.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cwchar>
 #include <string>
 
@@ -14,7 +15,7 @@ constexpr wchar_t kWindowClass[] = L"WirelessBatteryTextStyleDialog";
 
 // Control ids. The two buttons use IDOK/IDCANCEL so IsDialogMessage maps Enter and Esc onto them.
 enum : int {
-    kIdFont = 100, kIdSize, kIdWeight, kIdIconSize, kIdSpacing, kIdGap,
+    kIdFont = 100, kIdSize, kIdWeight, kIdIconSize, kIdSpacing, kIdGap, kIdLetterSpacing,
     kIdError = 200,
 };
 
@@ -26,6 +27,7 @@ struct StyleState {
     widget::TextStyle initial;
     widget::TextStyle result;
     HWND font = nullptr, size = nullptr, weight = nullptr, iconSize = nullptr, spacing = nullptr, gap = nullptr;
+    HWND letterSpacing = nullptr;
     HWND error = nullptr;
     HFONT uiFont = nullptr;
     bool accepted = false;
@@ -75,6 +77,40 @@ bool ParseNumber(HWND edit, int min, int max, int& out) {
     return true;
 }
 
+// One decimal at most, and no trailing ".0": the boxes read "5" and "5.5", never "5.000000".
+std::wstring FmtNum(float v) {
+    wchar_t buffer[32];
+    swprintf(buffer, ARRAYSIZE(buffer), L"%.1f", v);
+    std::wstring text = buffer;
+    if (text.size() > 2 && text.compare(text.size() - 2, 2, L".0") == 0) text.resize(text.size() - 2);
+    return text;
+}
+
+// Same as ParseNumber, but one decimal point is allowed: "0.5", "-1.5", "12".
+bool ParseDecimal(HWND edit, float min, float max, float& out) {
+    wchar_t buffer[32] = {};
+    GetWindowTextW(edit, buffer, ARRAYSIZE(buffer));
+    const wchar_t* p = buffer;
+    while (*p == L' ' || *p == L'	') p++;
+    if (!*p) return false;
+    wchar_t* end = nullptr;
+    const double v = wcstod(p, &end);
+    while (end && (*end == L' ' || *end == L'	')) end++;
+    if (!end || *end || v < min || v > max) return false;
+    out = (float)v;
+    return true;
+}
+
+bool CheckDecimal(HWND hwnd, HWND edit, float min, float max, float& out) {
+    if (ParseDecimal(edit, min, max, out)) return true;
+    StyleState* s = State(hwnd);
+    std::wstring msg = TF(L"Enter a number from {min} to {max}.", { { L"min", FmtNum(min) }, { L"max", FmtNum(max) } });
+    SetWindowTextW(s->error, msg.c_str());
+    SetFocus(edit);
+    SendMessageW(edit, EM_SETSEL, 0, -1);
+    return false;
+}
+
 bool CheckNumber(HWND hwnd, HWND edit, int min, int max, int& out) {
     if (ParseNumber(edit, min, max, out)) return true;
     StyleState* s = State(hwnd);
@@ -92,28 +128,29 @@ BOOL CALLBACK SetFontProc(HWND child, LPARAM font) {
     return TRUE;
 }
 
-bool Accept(HWND hwnd) {
+// Reads and validates the fields. Returns false with the error line filled in when a value is bad.
+bool Collect(HWND hwnd, widget::TextStyle& chosen) {
     StyleState* s = State(hwnd);
     SetWindowTextW(s->error, L"");
     wchar_t face[256] = {};
     GetWindowTextW(s->font, face, ARRAYSIZE(face));
     const int weightSel = (int)SendMessageW(s->weight, CB_GETCURSEL, 0, 0);
-    int size = 0, weight = 0, iconSize = 0, spacing = 0, gap = 0;
+    int size = 0, weight = 0, iconSize = 0;
+    float spacing = 0, gap = 0, letterSpacing = 0;
     weight = weightSel >= 0 ? (int)SendMessageW(s->weight, CB_GETITEMDATA, weightSel, 0) : 400;
     if (!CheckNumber(hwnd, s->size, kMinTextSize, kMaxTextSize, size) ||
         !CheckNumber(hwnd, s->iconSize, kMinIconSize, kMaxIconSize, iconSize) ||
-        !CheckNumber(hwnd, s->spacing, kMinIconGap, kMaxIconGap, spacing) ||
-        !CheckNumber(hwnd, s->gap, kMinItemGap, kMaxItemGap, gap))
+        !CheckDecimal(hwnd, s->spacing, kMinIconGap, kMaxIconGap, spacing) ||
+        !CheckDecimal(hwnd, s->gap, kMinItemGap, kMaxItemGap, gap) ||
+        !CheckDecimal(hwnd, s->letterSpacing, kMinLetterSpacing, kMaxLetterSpacing, letterSpacing))
         return false;
-    widget::TextStyle chosen;
     chosen.face = face;
     chosen.size = size;
     chosen.weight = weight;
     chosen.iconSize = iconSize;
     chosen.iconGap = spacing;
     chosen.itemGap = gap;
-    s->result = chosen;
-    s->accepted = true;
+    chosen.letterSpacing = letterSpacing;
     return true;
 }
 
@@ -163,20 +200,17 @@ void CreateControls(HWND hwnd, StyleState& s) {
     Label(hwnd, T(L"Icon size (px)"), dpi, kPad, 108, kFieldW);
     Label(hwnd, T(L"Text-icon spacing (px)"), dpi, kCol2X, 108, kFieldW);
     s.iconSize = EditBox(hwnd, std::to_wstring(s.initial.iconSize).c_str(), dpi, kPad, 126, kFieldW, kIdIconSize, true);
-    s.spacing = EditBox(hwnd, std::to_wstring(s.initial.iconGap).c_str(), dpi, kCol2X, 126, kFieldW, kIdSpacing, false);
+    s.spacing = EditBox(hwnd, FmtNum(s.initial.iconGap).c_str(), dpi, kCol2X, 126, kFieldW, kIdSpacing, false);
 
     Label(hwnd, T(L"Device spacing (px)"), dpi, kPad, 158, kFieldW);
-    s.gap = EditBox(hwnd, std::to_wstring(s.initial.itemGap).c_str(), dpi, kPad, 176, kFieldW, kIdGap, true);
+    Label(hwnd, T(L"Letter spacing (px)"), dpi, kCol2X, 158, kFieldW);
+    s.gap = EditBox(hwnd, FmtNum(s.initial.itemGap).c_str(), dpi, kPad, 176, kFieldW, kIdGap, false);
+    // Decimals are allowed in the gaps, and the letter spacing can be negative, so none of these
+    // three can use ES_NUMBER; the range check covers what may be typed.
+    s.letterSpacing = EditBox(hwnd, FmtNum(s.initial.letterSpacing).c_str(), dpi, kCol2X, 176, kFieldW,
+                              kIdLetterSpacing, false);
 
     s.error = Label(hwnd, L"", dpi, kPad, 206, kClientW - kPad * 2);
-
-    const int btnW = dlg::kButtonW, btnH = dlg::kButtonH, btnY = 228;
-    CreateWindowExW(0, L"BUTTON", T(L"Cancel"), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                    S(dpi, kClientW - kPad - btnW * 2 - dlg::kButtonGap), S(dpi, btnY), S(dpi, btnW), S(dpi, btnH),
-                    hwnd, (HMENU)(INT_PTR)IDCANCEL, inst, nullptr);
-    CreateWindowExW(0, L"BUTTON", T(L"Save"), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                    S(dpi, kClientW - kPad - btnW), S(dpi, btnY), S(dpi, btnW), S(dpi, btnH),
-                    hwnd, (HMENU)(INT_PTR)IDOK, inst, nullptr);
 
     s.uiFont = dlg::SystemFont(dpi);
     if (s.uiFont) EnumChildWindows(hwnd, SetFontProc, (LPARAM)s.uiFont);
@@ -200,7 +234,12 @@ LRESULT CALLBACK StyleProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_COMMAND: {
             WORD id = LOWORD(wp), notice = HIWORD(wp);
             if (id == IDOK && (notice == BN_CLICKED || notice == 0)) {
-                if (Accept(hwnd)) DestroyWindow(hwnd);
+                widget::TextStyle chosen;
+                if (Collect(hwnd, chosen)) {
+                    state->result = chosen;
+                    state->accepted = true;
+                    DestroyWindow(hwnd);
+                }
                 return 0;
             }
             if (id == IDCANCEL) {
@@ -237,7 +276,8 @@ LRESULT CALLBACK StyleProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 }  // namespace
 
-bool PromptTextStyle(HWND owner, const widget::TextStyle& current, widget::TextStyle& result) {
+bool PromptTextStyle(HWND owner, const widget::TextStyle& current, widget::TextStyle& result,
+                     const std::function<void(const widget::TextStyle&)>& onApply) {
     HINSTANCE inst = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{ sizeof(wc) };
     wc.hInstance = inst;
@@ -258,6 +298,14 @@ bool PromptTextStyle(HWND owner, const widget::TextStyle& current, widget::TextS
     shell.clientH = kClientH;
     shell.state = &state;
     shell.focusId = kIdFont;
+    shell.onApply = [&state, &onApply](HWND hwnd) {
+        widget::TextStyle chosen;
+        if (!Collect(hwnd, chosen)) return false;  // the error line already says what is wrong
+        state.result = chosen;
+        state.accepted = true;  // Save after Apply keeps the same values
+        if (onApply) onApply(chosen);
+        return true;
+    };
     if (!dlg::Run(owner, shell)) return false;
     if (state.accepted) result = state.result;
     return state.accepted;

@@ -1,6 +1,8 @@
 #include "dialog_shell.h"
+#include "i18n.h"
 
 #include <algorithm>
+#include <commctrl.h>
 
 namespace dlg {
 
@@ -21,6 +23,21 @@ HFONT SystemFont(int dpi) {
 }
 
 int TextLine(int dpi) { return MulDiv(kLabelH, dpi, 96); }
+
+namespace {
+
+// The shell owns the Apply button and the dialog does not know its id, so the notification is taken
+// here (a window subclass sits in front of the dialog's own procedure) and never reaches it.
+LRESULT CALLBACK ApplyProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR ref) {
+    const Shell* shell = reinterpret_cast<const Shell*>(ref);
+    if (msg == WM_COMMAND && LOWORD(wp) == kIdApply && HIWORD(wp) == BN_CLICKED) {
+        if (shell && shell->onApply) shell->onApply(hwnd);
+        return 0;
+    }
+    return DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+}  // namespace
 
 bool Run(HWND owner, const Shell& shell) {
     HINSTANCE inst = GetModuleHandleW(nullptr);
@@ -48,6 +65,29 @@ bool Run(HWND owner, const Shell& shell) {
                                   nullptr, inst, shell.state);
     if (!dialog) return false;
 
+    // The button row belongs to the frame, not to the dialog: same place, same size, same order
+    // everywhere. Slot 0 sits against the right edge, slot 2 is the leftmost.
+    HFONT font = SystemFont(dpi);
+    {
+        const int pad = MulDiv(kPad, dpi, 96), bw = MulDiv(kButtonW, dpi, 96);
+        const int bh = MulDiv(kButtonH, dpi, 96), gap = MulDiv(kButtonGap, dpi, 96);
+        const int right = MulDiv(shell.clientW, dpi, 96) - pad;
+        const int y = MulDiv(shell.clientH, dpi, 96) - pad - bh;
+        struct Button { int slot; const wchar_t* text; int id; DWORD style; };
+        const Button buttons[] = {
+            { 0, T(L"Save"), IDOK, BS_DEFPUSHBUTTON },
+            { 1, T(L"Apply"), kIdApply, 0 },
+            { 2, T(L"Cancel"), IDCANCEL, 0 },
+        };
+        for (const Button& b : buttons) {
+            const int x = right - (b.slot + 1) * bw - b.slot * gap;
+            HWND h = CreateWindowExW(0, L"BUTTON", b.text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | b.style,
+                                     x, y, bw, bh, dialog, (HMENU)(INT_PTR)b.id, inst, nullptr);
+            if (h && font) SendMessageW(h, WM_SETFONT, (WPARAM)font, TRUE);
+        }
+    }
+    SetWindowSubclass(dialog, ApplyProc, 1, (DWORD_PTR)&shell);
+
     const bool ownerEnabled = owner && IsWindowEnabled(owner);
     if (ownerEnabled) EnableWindow(owner, FALSE);
     ShowWindow(dialog, SW_SHOW);
@@ -70,7 +110,11 @@ bool Run(HWND owner, const Shell& shell) {
             DispatchMessageW(&msg);
         }
     }
-    if (IsWindow(dialog)) DestroyWindow(dialog);
+    if (IsWindow(dialog)) {
+        RemoveWindowSubclass(dialog, ApplyProc, 1);
+        DestroyWindow(dialog);
+    }
+    if (font) DeleteObject(font);
     if (ownerEnabled) EnableWindow(owner, TRUE);
     return true;
 }

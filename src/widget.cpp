@@ -62,6 +62,8 @@ int Dpi() {
     return d ? (int)d : 96;
 }
 int Px(int v) { return MulDiv(v, Dpi(), 96); }
+// Same, for the fractional gaps: scale first, round afterwards, or 0.5 and 1 px would both land on 1.
+int Pxf(float v) { return (int)std::lround(v * Dpi() / 96.0); }
 
 // Some taskbar customizations report tray geometry that places the strip off-screen (#2993).
 // A plain clamp to x=0 is insufficient: the Start/task buttons may cover a child widget there.
@@ -491,9 +493,11 @@ HFONT MakeFont(int px, int weight, const wchar_t* face, const wchar_t* fallback,
 int TextPx(int base) { return MulDiv(base, g_textStyle.size, 13); }
 int IconPx(int base) { return MulDiv(base, g_textStyle.iconSize, 16); }
 // Device gap for the three layouts: the normal row uses the full value, stacked and vertical use less.
-int GapPx(int base = 14) { return Px(std::max(2, MulDiv(g_textStyle.itemGap, base, 14))); }
+int GapPx(int base = 14) {
+    return Pxf(std::max(2.0f, g_textStyle.itemGap * base / 14.0f));
+}
 // Distance between a device icon and its percentage text (the "text spacing" setting).
-int TextGapPx() { return Px(g_textStyle.iconGap); }
+int TextGapPx() { return Pxf(g_textStyle.iconGap); }
 
 // Grayscale coverage mask of a string, cropped to its ink bounds.
 struct Mask {
@@ -501,13 +505,19 @@ struct Mask {
     std::vector<BYTE> a;
 };
 
-Mask RenderMask(const std::wstring& s, HFONT font, bool darkOnLight) {
+Mask RenderMask(const std::wstring& s, HFONT font, bool darkOnLight, float extra = 0.0f) {
     Mask m;
     HDC dc = CreateCompatibleDC(nullptr);
     HGDIOBJ of = SelectObject(dc, font);
-    SIZE sz;
+    // GDI's character extra is an integer, so a fractional value is applied by placing the characters
+    // one by one at accumulated (sub-pixel) positions: 0.5 px then really is half of 1 px instead of
+    // being rounded away. Whole values keep the single TextOut path.
+    const bool fractional = std::fabs(extra - std::round(extra)) > 0.01f;
+    SIZE sz{};
     GetTextExtentPoint32W(dc, s.c_str(), (int)s.size(), &sz);
-    int W = sz.cx + 8, H = sz.cy + 8;
+    int W = sz.cx + 8;
+    if (fractional || extra > 0.0f) W = sz.cx + (int)std::ceil(extra * (float)s.size()) + 8;
+    const int H = sz.cy + 8;
     BITMAPINFO bi{};
     bi.bmiHeader = { sizeof(BITMAPINFOHEADER), W, -H, 1, 32, BI_RGB };
     void* bits = nullptr;
@@ -516,7 +526,21 @@ Mask RenderMask(const std::wstring& s, HFONT font, bool darkOnLight) {
     memset(bits, darkOnLight ? 0xFF : 0x00, (size_t)W * H * 4);
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, darkOnLight ? RGB(0, 0, 0) : RGB(255, 255, 255));
-    TextOutW(dc, 4, 4, s.c_str(), (int)s.size());
+    if (fractional) {
+        // Accumulate the pen in floating point and round only the draw position, so the extra space
+        // is spread evenly instead of being truncated after the first character.
+        const int fallback = s.empty() ? 0 : sz.cx / (int)s.size();
+        double pen = 4.0;
+        for (wchar_t c : s) {
+            TextOutW(dc, (int)std::lround(pen), 4, &c, 1);
+            int advance = 0;
+            if (!GetCharWidth32W(dc, c, c, &advance)) advance = fallback;
+            pen += advance + extra;
+        }
+    } else {
+        SetTextCharacterExtra(dc, (int)std::lround(extra));
+        TextOutW(dc, 4, 4, s.c_str(), (int)s.size());
+    }
     GdiFlush();
     auto* p = static_cast<DWORD*>(bits);
     auto cover = [&](DWORD v) -> BYTE {
@@ -706,7 +730,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         }
         out.push_back(std::move(icon));
         std::wstring t = !it.text.empty() ? it.text : it.percent >= 0 ? std::to_wstring(it.percent) + (g_showPercentSign ? L"%" : L"") : L"?";
-        Piece label{ RenderMask(t, text, g_light), tc, a, mark || link ? TextGapPx() : 0 };
+        Piece label{ RenderMask(t, text, g_light, g_textStyle.letterSpacing * Dpi() / 96.0f), tc, a,
+                      mark || link ? TextGapPx() : 0 };
         if (branded && it.percent >= 0) {
             label.barPct = it.percent;
             label.barColor = it.low ? red : accent;

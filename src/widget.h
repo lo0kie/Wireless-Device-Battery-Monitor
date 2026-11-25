@@ -30,8 +30,11 @@ struct TextStyle {
     int size = 13;            // percentage text height, 9..24 px
     int weight = 400;         // font weight, 100..900 (400 = normal, 700 = bold)
     int iconSize = 16;        // device icon height, 10..28 px (independent of text size)
-    int iconGap = 5;          // space between a device icon and its percentage text, 0..24 px
-    int itemGap = 14;         // space between devices, 2..60 px
+    float iconGap = 5;        // space between a device icon and its percentage text, 0..24 px
+    float itemGap = 14;       // space between devices, 2..60 px
+    float letterSpacing = 0;  // extra space between characters of the percentage text, -2..12 px
+    // The three gaps are fractional: at 150% DPI a 0.5 px step is 0.75 device pixels, which is the
+    // difference between text that breathes and text that does not. They are rounded when drawn.
 };
 void SetTextStyle(const TextStyle& style);
 // The Segoe Fluent Icons glyph the strip uses for a kind of device (also used by the menu).

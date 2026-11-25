@@ -65,18 +65,10 @@ LRESULT CALLBACK OffsetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             state->error = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_LEFT,
                                            s(dlg::kPad), s(60), s(kFieldW), s(dlg::kLabelH),
                                            hwnd, (HMENU)(INT_PTR)kIdError, inst, nullptr);
-            HWND save = CreateWindowExW(0, L"BUTTON", T(L"Save"),
-                                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                                        s(kClientW - dlg::kPad - dlg::kButtonW), s(88), s(dlg::kButtonW),
-                                        s(dlg::kButtonH), hwnd, (HMENU)(INT_PTR)IDOK, inst, nullptr);
-            HWND cancel = CreateWindowExW(0, L"BUTTON", T(L"Cancel"),
-                                          WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                                          s(kClientW - dlg::kPad - dlg::kButtonW * 2 - dlg::kButtonGap), s(88),
-                                          s(dlg::kButtonW), s(dlg::kButtonH), hwnd, (HMENU)(INT_PTR)IDCANCEL, inst,
-                                          nullptr);
+            // The button row comes from dlg::Run, so every dialog's buttons sit in the same place.
             state->uiFont = dlg::SystemFont(dpi);
             if (state->uiFont) {
-                for (HWND c : { label, state->edit, state->error, save, cancel })
+                for (HWND c : { label, state->edit, state->error })
                     SendMessageW(c, WM_SETFONT, (WPARAM)state->uiFont, TRUE);
             }
             SendMessageW(state->edit, EM_SETLIMITTEXT, 6, 0);
@@ -113,7 +105,7 @@ LRESULT CALLBACK OffsetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 }  // namespace
 
-bool PromptTaskbarOffset(HWND owner, int current, int& result) {
+bool PromptTaskbarOffset(HWND owner, int current, int& result, const std::function<void(int)>& onApply) {
     HINSTANCE inst = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{ sizeof(wc) };
     wc.hInstance = inst;
@@ -134,6 +126,24 @@ bool PromptTaskbarOffset(HWND owner, int current, int& result) {
     shell.clientH = kClientH;
     shell.state = &state;
     shell.focusId = kIdEdit;
+    shell.onApply = [&state, &onApply](HWND hwnd) {
+        wchar_t buffer[16] = {};
+        GetWindowTextW(state.edit, buffer, ARRAYSIZE(buffer));
+        int value = 0;
+        if (!ParseOffset(buffer, value)) {
+            std::wstring text = TF(L"Enter a whole number from {min} to {max}.",
+                                   { { L"min", std::to_wstring(kMinTaskbarOffset) },
+                                     { L"max", std::to_wstring(kMaxTaskbarOffset) } });
+            SetWindowTextW(state.error, text.c_str());
+            SetFocus(state.edit);
+            SendMessageW(state.edit, EM_SETSEL, 0, -1);
+            return false;
+        }
+        state.result = value;
+        state.accepted = true;
+        if (onApply) onApply(value);
+        return true;
+    };
     if (!dlg::Run(owner, shell)) return false;
     if (state.accepted) result = state.result;
     return state.accepted;

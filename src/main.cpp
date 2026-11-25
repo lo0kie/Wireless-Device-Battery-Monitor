@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -353,6 +354,24 @@ int LoadIntSetting(const wchar_t* name, int def, int min, int max) {
     if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, name, RRF_RT_REG_DWORD, nullptr, &v, &sz) != ERROR_SUCCESS) return def;
     return std::clamp((int)v, min, max);
 }
+// Fractional pixel settings live in a separate key that stores tenths of a pixel ("...Px10"). The
+// whole-pixel key an older build wrote is still read when the new one is absent, and rewritten on
+// save so downgrading keeps a sensible value.
+float LoadPxSetting(const wchar_t* tenths, const wchar_t* whole, float def, float min, float max) {
+    DWORD v = 0, sz = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, tenths, RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS)
+        return std::clamp((float)v / 10.0f, min, max);
+    if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, whole, RRF_RT_REG_DWORD, nullptr, &v, &sz) == ERROR_SUCCESS)
+        return std::clamp((float)v, min, max);
+    return def;
+}
+void SavePxSetting(const wchar_t* tenths, const wchar_t* whole, float v) {
+    DWORD t = (DWORD)std::lround(v * 10.0f);
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, tenths, REG_DWORD, &t, sizeof(t));
+    DWORD w = (DWORD)std::lround(v);
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, whole, REG_DWORD, &w, sizeof(w));
+}
+
 void SaveIntSetting(const wchar_t* name, int v) {
     DWORD d = (DWORD)v;
     RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, name, REG_DWORD, &d, sizeof(d));
@@ -375,8 +394,10 @@ widget::TextStyle LoadTextStyle() {
     s.size = LoadIntSetting(L"TextSizePx", s.size, kMinTextSize, kMaxTextSize);
     s.weight = LoadIntSetting(L"TextWeight", s.weight, kMinTextWeight, kMaxTextWeight);
     s.iconSize = LoadIntSetting(L"TextIconSizePx", s.iconSize, kMinIconSize, kMaxIconSize);
-    s.iconGap = LoadIntSetting(L"TextIconGapPx", s.iconGap, kMinIconGap, kMaxIconGap);
-    s.itemGap = LoadIntSetting(L"TextItemGapPx", s.itemGap, kMinItemGap, kMaxItemGap);
+    s.iconGap = LoadPxSetting(L"TextIconGapPx10", L"TextIconGapPx", s.iconGap, kMinIconGap, kMaxIconGap);
+    s.itemGap = LoadPxSetting(L"TextItemGapPx10", L"TextItemGapPx", s.itemGap, kMinItemGap, kMaxItemGap);
+    s.letterSpacing = LoadPxSetting(L"TextLetterSpacingPx10", L"TextLetterSpacingPx", s.letterSpacing,
+                                    kMinLetterSpacing, kMaxLetterSpacing);
     return s;
 }
 bool LoadRingStyle() { return LoadBoolSetting(L"RingStyle", false); }
@@ -982,8 +1003,9 @@ void ApplyTextStyle(const widget::TextStyle& style) {
     SaveIntSetting(L"TextSizePx", style.size);
     SaveIntSetting(L"TextWeight", style.weight);
     SaveIntSetting(L"TextIconSizePx", style.iconSize);
-    SaveIntSetting(L"TextIconGapPx", style.iconGap);
-    SaveIntSetting(L"TextItemGapPx", style.itemGap);
+    SavePxSetting(L"TextIconGapPx10", L"TextIconGapPx", style.iconGap);
+    SavePxSetting(L"TextItemGapPx10", L"TextItemGapPx", style.itemGap);
+    SavePxSetting(L"TextLetterSpacingPx10", L"TextLetterSpacingPx", style.letterSpacing);
     widget::SetTextStyle(style);
 }
 
@@ -1495,7 +1517,9 @@ void ShowMenu() {
         case ID_PERCENT_SIGN: SetShowPercentSign(!g_showPercentSign); break;
         case ID_TEXT_STYLE: {
             widget::TextStyle style = g_textStyle;
-            if (PromptTextStyle(g_hwnd, style, style)) ApplyTextStyle(style);
+            if (PromptTextStyle(g_hwnd, style, style,
+                                [](const widget::TextStyle& s) { ApplyTextStyle(s); }))
+                ApplyTextStyle(style);
             break;
         }
         case ID_RING_STYLE: SetRingStyle(!g_ringStyle); break;
@@ -1527,7 +1551,9 @@ void ShowMenu() {
             }
             if (cmd == ID_POSITION_FIRST + ARRAYSIZE(POSITION_OFFSETS)) {
                 int px = 0;
-                if (PromptTaskbarOffset(g_hwnd, LoadTaskbarOffset(), px)) SetTaskbarOffset(px);
+                if (PromptTaskbarOffset(g_hwnd, LoadTaskbarOffset(), px,
+                                        [](int v) { SetTaskbarOffset(v); }))
+                    SetTaskbarOffset(px);
                 break;
             }
             if (cmd >= ID_LIMIT_FIRST && cmd < ID_LIMIT_FIRST + (UINT)alerts::kChargeLimitCount) {
