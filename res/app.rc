@@ -4,6 +4,8 @@
 // App icon by nik-txt (app.svg, made by make_icon.py): white for the exe and dark themes, black for light ones.
 1 ICON "app.ico"
 2 ICON "app_light.ico"
+// The manifest declares the Common Controls v6 dependency (TaskDialogIndirect lives there) and the
+// PerMonitorV2 DPI mode. wWinMain still calls SetProcessDpiAwarenessContext as a belt-and-braces.
 1 24 "app.manifest"
 
 // The built-in UI languages: lang\*.txt joined by the build (see src/i18n.cpp).
@@ -11,6 +13,11 @@ LANGS RCDATA "languages.txt"
 
 // Material Icons (Apache-2.0), loaded as a private font at runtime; see src/icon_font.cpp.
 MATERIAL_FONT RCDATA "MaterialIconsOutlined-Regular.otf"
+
+// The settings window is an HTML page rendered by WebView2 (see src/settings_panel.cpp).
+SETTINGS_HTML RCDATA "settings.html"
+// WebView2's loader, unpacked next to the user data on first use so the app stays a single exe.
+WEBVIEW2_LOADER RCDATA "../third_party/webview2/x64/WebView2Loader.dll"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION WB_VERSION_RESOURCE

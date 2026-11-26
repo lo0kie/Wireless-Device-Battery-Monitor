@@ -41,3 +41,7 @@ Full notices ship with the installer as `THIRD_PARTY_NOTICES.txt` and are reprod
 - **Material Icons Outlined** (`res/MaterialIconsOutlined-Regular.otf`), Copyright Google LLC,
   Apache License 2.0 — see [res/fonts/LICENSE-APACHE.txt](res/fonts/LICENSE-APACHE.txt). **Modified:**
   the font is subset to the glyphs listed in `src/icon_font.cpp`; outlines and metrics are unchanged.
+- **Microsoft Edge WebView2** (`third_party/webview2`, and the `WebView2Loader.dll` embedded in the
+  exe), Copyright Microsoft Corporation. The settings window renders its HTML with the WebView2
+  runtime that ships with Windows; the SDK headers and the loader are used under the WebView2 SDK
+  license (<https://learn.microsoft.com/microsoft-edge/webview2/>).

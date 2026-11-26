@@ -33,6 +33,7 @@
 #include "memory_trim.h"
 #include "report.h"
 #include "rename_dialog.h"
+#include "settings_panel.h"
 #include "offset_dialog.h"
 #include "text_style_dialog.h"
 #include "popup_menu.h"
@@ -63,8 +64,9 @@ constexpr UINT ALERT_ICON_ID = 2;
 enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
     ID_BRAND_COLORS, ID_STACKED, ID_DEVICE_DIVIDER, ID_SHOW_TOOLTIP, ID_SHOW_DISCONNECTED, ID_RECORD_HISTORY, ID_DIM_SLEEPING,
-    ID_TRAY_WHEN_EMPTY, ID_MAKE_ROOM, ID_PERCENT_SIGN, ID_RING_STYLE, ID_CONNECTION_ICONS, ID_KEEP_MOUSE_LAST_KNOWN,
+    ID_TRAY_WHEN_EMPTY, ID_MAKE_ROOM, ID_PERCENT_SIGN, ID_RING_STYLE, ID_CONNECTION_ICONS,
     ID_PLACE_AUTO, ID_PLACE_TOP, ID_PLACE_TRAY, ID_PLACE_BOTTOM, ID_TEXT_STYLE,  // "Position on a vertical taskbar"
+    ID_SETTINGS, ID_DISPLAY_SETTINGS, ID_CHARGE_MENU, ID_POLL_MENU,
     ID_POSITION_FIRST = 700,  // "Position on the taskbar": 0=left end, 1=before apps, 2=custom offset
     ID_POLL_FIRST = 500,  // "Check battery every": ID_POLL_FIRST + 0..7
     ID_LIMIT_OFF = 600, ID_LIMIT_FIRST,  // "Notify when charged to": off, then alerts::kChargeLimits
@@ -119,7 +121,6 @@ bool g_makeRoom = true;      // step past other apps' taskbar widgets (menu opti
 // The fixed 40/80/120... presets were removed; every value in between is available via Custom.
 widget::VerticalPlace g_verticalPlace = widget::VerticalPlace::Auto;  // column position on a left / right taskbar
 bool g_beforeApps = false;   // widget just left of the taskbar apps (menu option, PR #760)
-bool g_keepMouseLastKnown = false;  // with "Hide last known", still show mice (menu option, PR #1422)
 bool g_brandColors = false;  // off by default; known brands get their color (Razer green, Logitech blue, ...)
 std::atomic<DWORD> g_pollIntervalMs{ 60 * 1000 };  // set from the menu, read by the worker thread
 
@@ -268,8 +269,6 @@ bool IsEntryHidden(const TrayEntry& e) {
     if (IsHidden(e.st.key)) return true;
     // Showing sleeping/disconnected devices overrides the hide-last-known rule for both kinds.
     if (g_showDisconnectedDevices && (!e.st.connected || e.st.asleep)) return false;
-    // A mouse sleeps between uses; its last level stays useful (PR #1422, opt-in).
-    if (g_hideLastKnown && g_keepMouseLastKnown && e.st.kind == DeviceKind::Mouse && e.lastPct >= 0) return false;
     return g_hideLastKnown && (e.st.asleep || (e.st.percent < 0 && e.lastPct >= 0));
 }
 
@@ -358,6 +357,7 @@ void SaveTaskbarOffset(int px) {
     else RegDeleteKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"TaskbarOffset");
 }
 void SaveRecordHistory(bool on) { SaveBoolSetting(L"RecordBatteryHistory", on); }
+void SetRecordHistory(bool on) { g_recordHistory = on; SaveRecordHistory(on); }
 bool LoadWidgetBackground() { return LoadBoolSetting(L"WidgetBackground", false); }
 void SaveWidgetBackground(bool on) { SaveBoolSetting(L"WidgetBackground", on); }
 std::wstring LoadWidgetMonitor() {
@@ -800,7 +800,8 @@ void UpdateWidget() {
         it.kind = e->st.kind;
         bool offline = !e->st.connected;
         it.percent = offline ? -1 : (e->st.percent >= 0 ? e->st.percent : e->lastPct);
-        if (offline) it.text = L"--%";  // clear status, not a stale percentage
+        // Clear status instead of a stale percentage; the "%" only when the setting asks for it.
+        if (offline) it.text = g_showPercentSign ? L"--%" : L"--";
         else if (e->st.percent >= 0) it.text = T(e->st.levelText);
         it.charging = !offline && !e->st.asleep && e->st.charging;
         it.full = !offline && (e->st.full || (e->st.charging && it.percent >= 100));
@@ -975,14 +976,6 @@ void SetWidgetBackground(bool on) {
     widget::SetBackground(on);
 }
 
-void SetKeepMouseLastKnown(bool on) {
-    g_keepMouseLastKnown = on;
-    SaveBoolSetting(L"KeepMouseLastKnown", on);
-    for (auto& [k, e] : g_entries) ApplyEntry(e);
-    UpdatePlaceholder();
-    UpdateWidget();
-}
-
 void SetHideLastKnown(bool on) {
     g_hideLastKnown = on;
     SaveHideLastKnown(on);
@@ -1070,7 +1063,12 @@ void SetShowPercentSign(bool on) {
     g_showPercentSign = on;
     SaveShowPercentSign(on);
     widget::SetShowPercentSign(on);
+    // The offline placeholder ("--%" / "--") is baked into each item when the strip is built, so a
+    // repaint alone would keep the old text; rebuild the items as well.
+    UpdateWidget();
 }
+
+void ApplyTextStyle(const widget::TextStyle& style);  // forward declaration for the panel callback
 
 void ApplyTextStyle(const widget::TextStyle& style) {
     g_textStyle = style;
@@ -1325,7 +1323,7 @@ void ShowMenu(bool settings) {
         Item off = raw(T(L"Off"), ID_LIMIT_OFF);
         off.checked = checked == ID_LIMIT_OFF;
         sub.push_back(dot(off));
-        Item item = raw(T(L"Notify when charged to"), 0);
+        Item item = raw(T(L"Notify when charged to"), ID_CHARGE_MENU);
         item.children = std::move(sub);
         top.push_back(item);
     }
@@ -1340,8 +1338,7 @@ void ShowMenu(bool settings) {
             it.checked = secs * 1000 == g_pollIntervalMs;
             sub.push_back(dot(it));
         }
-        Item item = raw(T(L"Check battery every"), 0);
-
+        Item item = raw(T(L"Check battery every"), ID_POLL_MENU);
         item.children = std::move(sub);
         top.push_back(item);
     }
@@ -1439,10 +1436,10 @@ void ShowMenu(bool settings) {
                              : g_verticalPlace == widget::VerticalPlace::Bottom    ? ID_PLACE_BOTTOM
                                                                                    : ID_PLACE_AUTO;
         for (UINT id : { (UINT)ID_PLACE_AUTO, (UINT)ID_PLACE_TOP, (UINT)ID_PLACE_TRAY, (UINT)ID_PLACE_BOTTOM }) {
-            const wchar_t* label = id == ID_PLACE_AUTO    ? T(L"Automatic (keeps clear of app icons)")
+            const wchar_t* label = id == ID_PLACE_AUTO    ? T(L"Automatic")
                                    : id == ID_PLACE_TOP   ? T(L"Top of the taskbar")
                                    : id == ID_PLACE_TRAY  ? T(L"Above the notification area")
-                                                          : T(L"Bottom of the taskbar (moves the taskbar icons up, Windows 11)");
+                                                          : T(L"Bottom of the taskbar");
             Item it = raw(label, id);
             it.checked = id == checked;
             sub.push_back(dot(it));
@@ -1497,10 +1494,6 @@ void ShowMenu(bool settings) {
         Item hide = raw(T(L"Hide last known / asleep devices"), ID_HIDE_LAST_KNOWN);
         hide.checked = g_hideLastKnown;
         display.push_back(hide);
-        Item keep = raw(T(L"Keep last known battery for mice"), ID_KEEP_MOUSE_LAST_KNOWN);
-        keep.checked = g_keepMouseLastKnown;
-        keep.disabled = !g_hideLastKnown;
-        display.push_back(keep);
         display.push_back(sep());
         Item disconnected = raw(T(L"Show sleeping / disconnected devices"), ID_SHOW_DISCONNECTED);
         disconnected.checked = g_showDisconnectedDevices;
@@ -1510,7 +1503,7 @@ void ShowMenu(bool settings) {
         display.push_back(dim);
     }
     {
-        Item item = raw(T(L"Display settings"), 0);
+        Item item = raw(T(L"Display settings"), ID_DISPLAY_SETTINGS);
         item.children = std::move(display);
         top.push_back(item);
     }
@@ -1561,13 +1554,20 @@ void ShowMenu(bool settings) {
         top.push_back(exit);
     }
 
-    // Split into the two menus. Device rows and Refresh belong to the left-click menu; everything
-    // that configures the application belongs to the right-click menu. Exit and the empty-list
-    // placeholder are useful in both. Item ids are chosen so a row's group can be recognised without
-    // duplicating the build: device rows are the only parent rows with a rightText (their status).
+    // Split into the two menus. The history, charge limit, poll interval, display and text style
+    // settings live in the settings window instead, so they are in neither menu. Device rows,
+    // Refresh and the Settings entry belong to the left-click menu; every other setting stays in the
+    // right-click menu. Exit and the empty-list placeholder appear in both.
     {
         std::vector<Item> filtered;
+        auto inPanel = [](UINT_PTR id) {
+            return id == ID_RECORD_HISTORY || id == ID_CHARGE_MENU || id == ID_POLL_MENU ||
+                   id == ID_DISPLAY_SETTINGS || id == ID_LIMIT_OFF ||
+                   (id >= ID_LIMIT_FIRST && id < ID_LIMIT_FIRST + (UINT_PTR)alerts::kChargeLimitCount) ||
+                   (id >= ID_POLL_FIRST && id < ID_POLL_FIRST + ARRAYSIZE(POLL_SECONDS));
+        };
         for (const Item& it : top) {
+            if (inPanel(it.id)) continue;
             const bool isSep = it.kind == Item::Kind::Separator;
             const bool isDevice = it.id == 0 && !it.rightText.empty() && !it.children.empty();
             const bool isBoth = isSep || it.id == ID_EXIT || (it.id == 0 && it.disabled && it.children.empty() && it.rightText.empty());
@@ -1578,6 +1578,15 @@ void ShowMenu(bool settings) {
                 bool prevSep = !filtered.empty() && filtered.back().kind == Item::Kind::Separator;
                 if (!(isSep && (filtered.empty() || prevSep))) filtered.push_back(it);
             }
+        }
+        // Left-click menu gets a Settings entry before Exit.
+        if (!settings) {
+            Item settingsItem = raw(T(L"Settings..."), ID_SETTINGS);
+            // Insert just before the trailing Exit so the menu reads: devices / Refresh / Settings / Exit.
+            auto where = filtered.end();
+            for (auto it = filtered.begin(); it != filtered.end(); ++it)
+                if (it->id == ID_EXIT) { where = it; break; }
+            filtered.insert(where, settingsItem);
         }
         while (!filtered.empty() && filtered.back().kind == Item::Kind::Separator) filtered.pop_back();
         top = std::move(filtered);
@@ -1607,7 +1616,6 @@ void ShowMenu(bool settings) {
         case ID_REFRESH: SetEvent(g_refreshEvt); break;
         case ID_AUTOSTART: SetAutostart(!AutostartEnabled()); break;
         case ID_HIDE_LAST_KNOWN: SetHideLastKnown(!g_hideLastKnown); break;
-        case ID_KEEP_MOUSE_LAST_KNOWN: SetKeepMouseLastKnown(!g_keepMouseLastKnown); break;
         case ID_TRAY_WHEN_EMPTY: SetTrayWhenEmpty(!g_trayWhenEmpty); break;
         case ID_SHOW_DISCONNECTED: SetShowDisconnectedDevices(!g_showDisconnectedDevices); break;
         case ID_DIM_SLEEPING: SetDimSleeping(!g_dimSleeping); break;
@@ -1626,6 +1634,62 @@ void ShowMenu(bool settings) {
             if (PromptTextStyle(g_hwnd, L"Text style", style, style,
                                 [](const widget::TextStyle& s) { ApplyTextStyle(s); }))
                 ApplyTextStyle(style);
+            break;
+        }
+        case ID_SETTINGS: {
+            SettingsData data;
+            data.recordHistory = g_recordHistory;
+            data.chargeLimit = g_chargeLimit;
+            for (int l : alerts::kChargeLimits) data.chargeLimits.push_back(l);
+            data.pollSeconds = g_pollIntervalMs / 1000;
+            for (DWORD s : POLL_SECONDS) data.pollSecondsList.push_back((int)s);
+            data.wantWidget = g_wantWidget;
+            data.trayWhenEmpty = g_trayWhenEmpty;
+            data.stacked = g_stacked;
+            data.widgetBackground = g_widgetBackground;
+            data.ringStyle = g_ringStyle;
+            data.showPercentSign = g_showPercentSign;
+            data.brandColors = g_brandColors;
+            data.connectionIcons = g_connectionIcons;
+            data.deviceDivider = g_deviceDivider;
+            data.showTooltip = g_showTooltip;
+            data.beforeApps = g_beforeApps;
+            data.makeRoom = g_makeRoom;
+            data.taskbarOffset = LoadTaskbarOffset();
+            data.offsetList = { 0, 20, 40, 80, 120, 200 };
+            if (std::find(data.offsetList.begin(), data.offsetList.end(), data.taskbarOffset) == data.offsetList.end())
+                data.offsetList.insert(data.offsetList.begin(), data.taskbarOffset);
+            data.verticalPlace = (int)g_verticalPlace;
+            data.monitorChoice = g_widgetMonitor == L"main" ? 1 : (g_widgetMonitor == L"all" ? 0 : 2);
+            data.hideLastKnown = g_hideLastKnown;
+            data.showInactive = g_showDisconnectedDevices;
+            data.dimInactive = g_dimSleeping;
+            data.textStyle = g_textStyle;
+
+            SettingsCallbacks cb;
+            cb.recordHistory = [](bool v) { SetRecordHistory(v); };
+            cb.chargeLimit = [](int v) { SetChargeLimit(v); };
+            cb.pollSeconds = [](int v) { SetPollSeconds(v); };
+            cb.wantWidget = [](bool v) { SetMode(v); };
+            cb.trayWhenEmpty = [](bool v) { SetTrayWhenEmpty(v); };
+            cb.stacked = [](bool v) { SetStacked(v); };
+            cb.widgetBackground = [](bool v) { SetWidgetBackground(v); };
+            cb.ringStyle = [](bool v) { SetRingStyle(v); };
+            cb.showPercentSign = [](bool v) { SetShowPercentSign(v); };
+            cb.brandColors = [](bool v) { SetBrandColors(v); };
+            cb.connectionIcons = [](bool v) { SetConnectionIcons(v); };
+            cb.deviceDivider = [](bool v) { SetDeviceDivider(v); };
+            cb.showTooltip = [](bool v) { widget::SetTooltip(v); };
+            cb.beforeApps = [](bool v) { SetBeforeApps(v); };
+            cb.makeRoom = [](bool v) { SetMakeRoom(v); };
+            cb.taskbarOffset = [](int v) { SetTaskbarOffset(v); };
+            cb.verticalPlace = [](int v) { SetWidgetPlace((widget::VerticalPlace)v); };
+            cb.monitorChoice = [](int v) { SetWidgetMonitor(v == 0 ? L"all" : v == 1 ? L"main" : g_widgetMonitor); };
+            cb.hideLastKnown = [](bool v) { SetHideLastKnown(v); };
+            cb.showInactive = [](bool v) { SetShowDisconnectedDevices(v); };
+            cb.dimInactive = [](bool v) { SetDimSleeping(v); };
+            cb.textStyle = [](const widget::TextStyle& s) { ApplyTextStyle(s); };
+            ShowSettingsPanel(data, cb);
             break;
         }
         case ID_RING_STYLE: SetRingStyle(!g_ringStyle); break;
@@ -2114,7 +2178,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     g_stopEvt = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     g_wantWidget = LoadWidgetMode();
     g_hideLastKnown = LoadHideLastKnown();
-    g_keepMouseLastKnown = LoadBoolSetting(L"KeepMouseLastKnown", false);
     g_trayWhenEmpty = LoadTrayWhenEmpty();
     g_showDisconnectedDevices = LoadShowDisconnectedDevices();
     g_dimSleeping = LoadDimSleeping();

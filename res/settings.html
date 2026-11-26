@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Material 3 colour roles (dark by default; Windows light theme flips the roles below). */
+:root{
+  --surface:#131316;
+  --surface-container-lowest:#0e0e11;
+  --surface-container-low:#1b1b20;
+  --surface-container:#1f1f25;
+  --surface-container-high:#2a2a31;
+  --surface-container-highest:#35353d;
+  --on-surface:#e6e1e6;
+  --on-surface-variant:#c5c5d0;
+  --outline:#8f8f9c;
+  --outline-variant:#3b3b45;
+  --primary:#a8c7fa;
+  --on-primary:#06305f;
+  --primary-container:#0842a0;
+  --on-primary-container:#d3e3fd;
+  --state-hover:rgba(230,225,230,.08);
+  --state-press:rgba(230,225,230,.12);
+
+  /* M3 shape scale */
+  --shape-xs:4px;
+  --shape-sm:8px;
+  --shape-md:12px;
+  --shape-lg:16px;
+  --shape-full:999px;
+
+  /* M3 elevation */
+  --elev-2:0 2px 6px rgba(0,0,0,.30);
+  --elev-3:0 6px 16px rgba(0,0,0,.38);
+}
+html.light{
+  --surface:#fdfbff;
+  --surface-container-lowest:#ffffff;
+  --surface-container-low:#f7f2fa;
+  --surface-container:#f1ecf4;
+  --surface-container-high:#ece6f0;
+  --surface-container-highest:#e6e0e9;
+  --on-surface:#1b1b1f;
+  --on-surface-variant:#46464f;
+  --outline:#777680;
+  --outline-variant:#c9c5d0;
+  --primary:#0b57d0;
+  --on-primary:#ffffff;
+  --primary-container:#d3e3fd;
+  --on-primary-container:#041e49;
+  --state-hover:rgba(27,27,31,.06);
+  --state-press:rgba(27,27,31,.10);
+  --elev-2:0 2px 6px rgba(0,0,0,.12);
+  --elev-3:0 6px 16px rgba(0,0,0,.18);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden}
+body{
+  background:var(--surface);color:var(--on-surface);
+  font-family:"Segoe UI Variable Text","Segoe UI",Roboto,system-ui,sans-serif;
+  font-size:14px;line-height:20px;
+  -webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;user-select:none;
+}
+
+/* ---------- top app bar ---------- */
+.titlebar{height:56px;flex:0 0 56px;display:flex;align-items:center;padding:0 12px 0 24px;gap:12px}
+.titlebar .name{font-size:22px;line-height:28px;font-weight:500;letter-spacing:0}
+.titlebar .spacer{flex:1}
+.tbtn{
+  width:40px;height:40px;border:0;border-radius:var(--shape-full);background:transparent;
+  color:var(--on-surface);display:grid;place-items:center;cursor:default;
+  transition:background .12s;
+}
+.tbtn:hover{background:var(--state-hover)}
+.tbtn:active{background:var(--state-press)}
+.tbtn.close:hover{background:#b3261e;color:#ffffff}
+
+/* ---------- layout ---------- */
+.body{flex:1;display:flex;min-height:0}
+.side{
+  width:252px;flex:0 0 252px;padding:0 12px 12px 12px;
+  display:flex;flex-direction:column;gap:4px;
+}
+.nav{
+  display:flex;align-items:center;gap:12px;height:56px;padding:0 16px;
+  border-radius:var(--shape-full);cursor:default;color:var(--on-surface-variant);
+  transition:background .12s,color .12s;
+}
+.nav svg{width:20px;height:20px;flex:0 0 auto}
+.nav span{font-size:14px;line-height:20px;font-weight:500;white-space:nowrap}
+.nav:hover{background:var(--state-hover)}
+.nav.active{background:var(--primary-container);color:var(--on-primary-container)}
+.content{flex:1;min-width:0;overflow-y:auto;padding:0 24px 24px 8px}
+.content::-webkit-scrollbar{width:12px}
+.content::-webkit-scrollbar-thumb{
+  background:var(--outline-variant);border-radius:var(--shape-full);
+  border:4px solid var(--surface);background-clip:content-box;
+}
+.content::-webkit-scrollbar-thumb:hover{background:var(--outline)}
+
+/* ---------- pages ---------- */
+.page{display:none;animation:fade .18s ease}
+.page.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+h1{font-size:24px;line-height:32px;font-weight:400;margin:4px 0 16px}
+h2{
+  font-size:12px;line-height:16px;font-weight:500;letter-spacing:.4px;
+  color:var(--on-surface-variant);margin:24px 0 8px;padding:0 4px;
+}
+h2:first-of-type{margin-top:4px}
+
+/* ---------- cards and rows ---------- */
+.card{background:var(--surface-container-low);border-radius:var(--shape-md);overflow:hidden}
+.row{
+  display:flex;align-items:center;gap:16px;min-height:56px;padding:8px 16px;
+  transition:background .12s;
+}
+.row + .row{border-top:1px solid var(--outline-variant)}
+.row:hover{background:var(--state-hover)}
+.row .txt{flex:1;min-width:0}
+.row .t{font-size:14px;line-height:20px}
+.row .s{font-size:12px;line-height:16px;color:var(--on-surface-variant);margin-top:2px}
+
+/* Slider rows: label hugs its text, the track fills the space up to the value, so the two
+   are never separated by a large empty gap. */
+.row.slider-row .txt{flex:0 0 auto;min-width:88px}
+.row.slider-row .range{flex:1 1 auto;min-width:120px}
+.row.slider-row input[type=range]{width:100%}
+
+/* ---------- switch (M3: 52x32 track) ---------- */
+.switch{position:relative;flex:0 0 auto;width:52px;height:32px;cursor:default}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .track{
+  position:absolute;inset:0;border-radius:var(--shape-full);
+  background:var(--surface-container-highest);border:2px solid var(--outline);
+  transition:background .16s ease,border-color .16s ease;
+}
+.switch .thumb{
+  position:absolute;left:4px;top:4px;width:20px;height:20px;border-radius:50%;
+  background:var(--outline);
+  transition:left .18s cubic-bezier(.2,0,0,1),background .16s ease;
+}
+.switch input:checked + .track{background:var(--primary);border-color:var(--primary)}
+.switch input:checked + .track .thumb{
+  left:24px;background:var(--on-primary);
+}
+.switch input:focus-visible + .track{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ---------- select (M3 outlined field, drawn list) ---------- */
+.sel{
+  position:relative;display:flex;align-items:center;gap:8px;min-width:150px;height:40px;
+  padding:0 12px;border:1px solid var(--outline);border-radius:var(--shape-xs);
+  background:transparent;font-size:14px;cursor:default;
+  transition:border-color .12s,background-color .12s;
+}
+.sel:hover{background:var(--state-hover)}
+.sel:focus-visible{outline:2px solid var(--primary);outline-offset:-1px}
+.sel.open{border-color:var(--primary)}
+.sel-value{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sel-chev{flex:0 0 auto;opacity:.75;transition:transform .16s ease}
+.sel.open .sel-chev{transform:rotate(180deg)}
+.sel-pop{
+  position:fixed;display:none;z-index:1000;padding:8px 0;
+  border-radius:var(--shape-xs);background:var(--surface-container);
+  box-shadow:var(--elev-3);overflow-y:auto;overscroll-behavior:contain;
+}
+.sel-pop::-webkit-scrollbar{width:10px}
+.sel-pop::-webkit-scrollbar-thumb{
+  background:var(--outline-variant);border-radius:var(--shape-full);
+  border:3px solid var(--surface-container);background-clip:content-box;
+}
+.sel-item{
+  height:40px;display:flex;align-items:center;padding:0 16px;
+  font-size:14px;white-space:nowrap;cursor:default;
+}
+.sel-item:hover{background:var(--state-hover)}
+.sel-item.sel-on{background:var(--primary-container);color:var(--on-primary-container)}
+
+/* ---------- radio ---------- */
+.radio{position:relative;flex:0 0 auto;width:20px;height:20px;cursor:default}
+.radio input{position:absolute;opacity:0;width:0;height:0}
+.radio .ring{
+  position:absolute;inset:0;border-radius:50%;border:2px solid var(--on-surface-variant);
+  transition:border-color .14s;
+}
+.radio .ring::after{
+  content:"";position:absolute;inset:4px;border-radius:50%;background:var(--primary);
+  transform:scale(0);transition:transform .16s cubic-bezier(.2,0,0,1);
+}
+.radio input:checked + .ring{border-color:var(--primary)}
+.radio input:checked + .ring::after{transform:scale(1)}
+.radio input:focus-visible + .ring{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ---------- slider ---------- */
+input[type=range]{appearance:none;width:168px;height:20px;background:transparent;cursor:default}
+input[type=range]::-webkit-slider-runnable-track{
+  height:4px;border-radius:2px;background:var(--surface-container-highest);
+}
+input[type=range]::-webkit-slider-thumb{
+  appearance:none;width:16px;height:16px;border-radius:50%;background:var(--primary);
+  margin-top:-6px;transition:transform .12s;
+}
+input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.1)}
+output{
+  min-width:48px;text-align:right;font-size:14px;color:var(--on-surface);font-weight:500;
+  font-variant-numeric:tabular-nums;
+}
+
+/* default-value tick on a slider */
+.range{position:relative;display:inline-flex;align-items:center}
+.range-tick{
+  position:absolute;top:50%;width:6px;height:6px;border-radius:50%;
+  background:var(--on-surface-variant);opacity:.55;pointer-events:none;
+  transform:translate(-3px,-50%);
+}
+</style>
+</head>
+<body>
+  <div class="titlebar" id="titlebar">
+    <div class="name" data-i18n="Settings">Settings</div>
+    <div class="spacer"></div>
+    <button class="tbtn close" id="closeBtn" title="Close" aria-label="Close">
+      <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+
+  <div class="body">
+    <nav class="side">
+      <div class="nav active" data-page="general">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h16M4 12h10M4 18h6" stroke-linecap="round"/></svg>
+        <span data-i18n="General">General</span>
+      </div>
+      <div class="nav" data-page="display">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4" stroke-linecap="round"/></svg>
+        <span data-i18n="Display style">Display style</span>
+      </div>
+      <div class="nav" data-page="textstyle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19h16M9 16l3-9 3 9M10 13h4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-i18n="Text style">Text style</span>
+      </div>
+      <div class="nav" data-page="position">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.4"/></svg>
+        <span data-i18n="Position">Position</span>
+      </div>
+      <div class="nav" data-page="devices">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="7" width="12" height="9" rx="2"/><path d="M15 10h3a3 3 0 0 1 3 3v0a3 3 0 0 1-3 3h-3M7 19h4" stroke-linecap="round"/></svg>
+        <span data-i18n="Devices">Devices</span>
+      </div>
+    </nav>
+
+    <div class="content" id="content">
+      <!-- General -->
+      <section class="page active" data-page="general">
+        <h1 data-i18n="General">General</h1>
+        <h2 data-i18n="Battery alerts and settings">Battery alerts and settings</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Record battery history">Record battery history</div></div>
+            <label class="switch"><input type="checkbox" data-key="recordHistory"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Notify when charged to">Notify when charged to</div></div>
+            <div class="sel" tabindex="0" data-key="chargeLimit" data-items="chargeLimitItems"><span class="sel-value"></span><svg class="sel-chev" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Check battery every">Check battery every</div></div>
+            <div class="sel" tabindex="0" data-key="pollSeconds" data-items="pollItems"><span class="sel-value"></span><svg class="sel-chev" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Display -->
+      <section class="page" data-page="display">
+        <h1 data-i18n="Display style">Display style</h1>
+        <h2 data-i18n="Taskbar widget">Taskbar widget</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Show on the taskbar">Show on the taskbar</div></div>
+            <label class="switch"><input type="checkbox" data-key="wantWidget"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Move to tray when no devices">Move to tray when no devices</div></div>
+            <label class="switch"><input type="checkbox" data-key="trayWhenEmpty"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Icons above percentages">Icons above percentages</div></div>
+            <label class="switch"><input type="checkbox" data-key="stacked"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Background behind taskbar text">Background behind taskbar text</div></div>
+            <label class="switch"><input type="checkbox" data-key="widgetBackground"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+        </div>
+        <h2 data-i18n="Appearance">Appearance</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Ring style">Ring style</div></div>
+            <label class="switch"><input type="checkbox" data-key="ringStyle"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Show percent sign">Show percent sign</div></div>
+            <label class="switch"><input type="checkbox" data-key="showPercentSign"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Brand colors">Brand colors</div></div>
+            <label class="switch"><input type="checkbox" data-key="brandColors"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Mark connection type">Mark connection type</div></div>
+            <label class="switch"><input type="checkbox" data-key="connectionIcons"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Separator between devices">Separator between devices</div></div>
+            <label class="switch"><input type="checkbox" data-key="deviceDivider"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Show tooltip">Show tooltip</div></div>
+            <label class="switch"><input type="checkbox" data-key="showTooltip"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Text style -->
+      <section class="page" data-page="textstyle">
+        <h1 data-i18n="Text style">Text style</h1>
+        <h2 data-i18n="Font">Font</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Font family">Font family</div></div>
+            <div class="sel" tabindex="0" data-key="tsFace" data-items="fontItems"><span class="sel-value"></span><svg class="sel-chev" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          </div>
+          <div class="row slider-row">
+            <div class="txt"><div class="t" data-i18n="Text size">Text size</div></div>
+            <input type="range" data-range="tsSize" data-default="13" min="9" max="24" step="1"><output></output>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Font weight">Font weight</div></div>
+            <div class="sel" tabindex="0" data-key="tsWeight" data-items="weightItems"><span class="sel-value"></span><svg class="sel-chev" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          </div>
+        </div>
+        <h2 data-i18n="Layout">Layout</h2>
+        <div class="card">
+          <div class="row slider-row">
+            <div class="txt"><div class="t" data-i18n="Icon size">Icon size</div></div>
+            <input type="range" data-range="tsIconSize" data-default="16" min="10" max="28" step="1"><output></output>
+          </div>
+          <div class="row slider-row">
+            <div class="txt"><div class="t" data-i18n="Icon gap">Icon gap</div></div>
+            <input type="range" data-range="tsIconGap" data-default="5" min="0" max="24" step="0.5"><output></output>
+          </div>
+          <div class="row slider-row">
+            <div class="txt"><div class="t" data-i18n="Item gap">Item gap</div></div>
+            <input type="range" data-range="tsItemGap" data-default="14" min="2" max="60" step="0.5"><output></output>
+          </div>
+          <div class="row slider-row">
+            <div class="txt"><div class="t" data-i18n="Letter spacing">Letter spacing</div></div>
+            <input type="range" data-range="tsLetterSpacing" data-default="0" min="-2" max="12" step="0.5"><output></output>
+          </div>
+        </div>
+      </section>
+
+      <!-- Position -->
+      <section class="page" data-page="position">
+        <h1 data-i18n="Position">Position</h1>
+        <h2 data-i18n="Position on the taskbar">Position on the taskbar</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="At the left end of the taskbar">At the left end of the taskbar</div></div>
+            <label class="radio"><input type="radio" name="pos" data-pos="0"><span class="ring"></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Just before the taskbar apps">Just before the taskbar apps</div></div>
+            <label class="radio"><input type="radio" name="pos" data-pos="1"><span class="ring"></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Custom offset">Custom offset</div></div>
+            <div class="sel" tabindex="0" data-key="taskbarOffset" data-items="offsetItems"><span class="sel-value"></span><svg class="sel-chev" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Make room for other taskbar widgets">Make room for other taskbar widgets</div></div>
+            <label class="switch"><input type="checkbox" data-key="makeRoom"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+        </div>
+        <h2 data-i18n="Position on a vertical taskbar">Position on a vertical taskbar</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Vertical placement">Vertical placement</div></div>
+            <div class="sel" tabindex="0" data-key="verticalPlace" data-items="verticalItems"><span class="sel-value"></span><svg class="sel-chev" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          </div>
+        </div>
+        <h2 data-i18n="Show the widget on">Show the widget on</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Monitor">Monitor</div></div>
+            <div class="sel" tabindex="0" data-key="monitorChoice" data-items="monitorItems"><span class="sel-value"></span><svg class="sel-chev" width="10" height="6" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Devices -->
+      <section class="page" data-page="devices">
+        <h1 data-i18n="Devices">Devices</h1>
+        <h2 data-i18n="Inactive devices">Inactive devices</h2>
+        <div class="card">
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Hide last known / asleep devices">Hide last known / asleep devices</div></div>
+            <label class="switch"><input type="checkbox" data-key="hideLastKnown"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Show sleeping / disconnected devices">Show sleeping / disconnected devices</div></div>
+            <label class="switch"><input type="checkbox" data-key="showInactive"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="txt"><div class="t" data-i18n="Dim sleeping / disconnected devices">Dim sleeping / disconnected devices</div></div>
+            <label class="switch"><input type="checkbox" data-key="dimInactive"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+
+<script>
+const BOOT = __BOOT_JSON__;
+(function () {
+  const t = BOOT.t || {}, v = BOOT.v || {};
+  if (BOOT.light) document.documentElement.classList.add('light');
+
+  // Localize text; keep the English key as a fallback.
+  document.querySelectorAll('[data-i18n]').forEach(function (el) {
+    const k = el.getAttribute('data-i18n');
+    if (t[k]) el.textContent = t[k];
+  });
+
+  function post(s) { if (window.chrome && chrome.webview) chrome.webview.postMessage(s); }
+
+  // Nav switching.
+  const navs = document.querySelectorAll('.nav');
+  const pages = document.querySelectorAll('.page');
+  navs.forEach(function (n) {
+    n.addEventListener('click', function () {
+      navs.forEach(function (x) { x.classList.toggle('active', x === n); });
+      pages.forEach(function (p) { p.classList.toggle('active', p.dataset.page === n.dataset.page); });
+      document.getElementById('content').scrollTop = 0;
+      // Hidden pages report a zero width, so a slider's default tick is only measurable now.
+      requestAnimationFrame(function () {
+        document.querySelectorAll('input[type=range][data-default]').forEach(function (r) {
+          if (r._placeTick) r._placeTick();
+        });
+      });
+    });
+  });
+
+  // Drawn dropdowns. The list is parked on <body> so no card can clip it.
+  let openSel = null;
+  function closeDropdown() {
+    if (!openSel) return;
+    openSel.classList.remove('open');
+    openSel.pop.style.display = 'none';
+    openSel = null;
+  }
+  function choose(sel, value, label) {
+    sel.value = value;
+    sel.querySelector('.sel-value').textContent = label;
+    sel.pop.querySelectorAll('.sel-item').forEach(function (it) {
+      it.classList.toggle('sel-on', it.dataset.value === value);
+    });
+    post('set:' + sel.dataset.key + '=' + value);
+  }
+  function openDropdown(sel) {
+    if (openSel === sel) { closeDropdown(); return; }
+    closeDropdown();
+    const r = sel.getBoundingClientRect();
+    const pop = sel.pop;
+    const pad = 8;  // keep this far from every window edge
+    const winW = window.innerWidth, winH = window.innerHeight;
+
+    // Measure the list at its natural size first, with no constraints applied.
+    pop.style.display = 'block';
+    pop.style.width = 'auto';
+    pop.style.maxHeight = 'none';
+    pop.style.left = '0px';
+    pop.style.top = '0px';
+    const naturalW = Math.min(Math.max(r.width, pop.scrollWidth), 320);
+    const naturalH = pop.scrollHeight;
+
+    // Horizontal: never wider than the window, and shifted left when the control sits near the edge.
+    const w = Math.min(naturalW, winW - pad * 2);
+    const left = Math.max(pad, Math.min(r.left, winW - w - pad));
+
+    // Vertical: prefer below, flip above, and only then clamp to whichever side has more room.
+    const below = winH - r.bottom - 4 - pad;
+    const above = r.top - 4 - pad;
+    let h, top;
+    if (naturalH <= below) {
+      h = naturalH; top = r.bottom + 4;
+    } else if (naturalH <= above) {
+      h = naturalH; top = r.top - 4 - naturalH;
+    } else if (below >= above) {
+      h = Math.max(96, below); top = r.bottom + 4;
+    } else {
+      h = Math.max(96, above); top = r.top - 4 - h;
+    }
+    h = Math.min(h, winH - pad * 2);
+    top = Math.max(pad, Math.min(top, winH - h - pad));
+
+    pop.style.width = w + 'px';
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+    pop.style.maxHeight = h + 'px';
+    sel.classList.add('open');
+    openSel = sel;
+  }
+  document.querySelectorAll('.sel[data-items]').forEach(function (sel) {
+    const key = sel.dataset.key;
+    const items = BOOT[sel.dataset.items] || [];
+    const pop = document.createElement('div');
+    pop.className = 'sel-pop';
+    items.forEach(function (it) {
+      const el = document.createElement('div');
+      el.className = 'sel-item';
+      el.dataset.value = String(it.v);
+      el.textContent = it.l;
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        choose(sel, String(it.v), it.l);
+        closeDropdown();
+      });
+      pop.appendChild(el);
+    });
+    document.body.appendChild(pop);
+    sel.pop = pop;
+    const cur = (key in v) ? String(v[key]) : (items[0] ? String(items[0].v) : '');
+    const hit = items.find(function (it) { return String(it.v) === cur; }) || items[0];
+    sel.value = hit ? String(hit.v) : '';
+    sel.querySelector('.sel-value').textContent = hit ? hit.l : '';
+    if (hit) pop.querySelectorAll('.sel-item').forEach(function (it) {
+      it.classList.toggle('sel-on', it.dataset.value === sel.value);
+    });
+    sel.addEventListener('click', function (e) { e.stopPropagation(); openDropdown(sel); });
+    sel.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDropdown(sel); }
+      else if (e.key === 'Escape') closeDropdown();
+    });
+  });
+  document.addEventListener('click', closeDropdown);
+  document.getElementById('content').addEventListener('scroll', closeDropdown);
+  window.addEventListener('resize', closeDropdown);
+
+  // Switches.
+  document.querySelectorAll('input[type=checkbox][data-key]').forEach(function (cb) {
+    const key = cb.dataset.key;
+    if (key in v) cb.checked = !!v[key];
+    cb.addEventListener('change', function () { post('set:' + key + '=' + (cb.checked ? 1 : 0)); });
+  });
+
+  // Sliders: apply while dragging, and mirror the value next to the track.
+  document.querySelectorAll('input[type=range][data-range]').forEach(function (r) {
+    const key = r.dataset.range;
+    if (key in v) r.value = v[key];
+    const out = r.parentElement.querySelector('output');
+    const show = function () { out.textContent = r.value; };
+    show();
+    r.addEventListener('input', function () { show(); post('set:' + key + '=' + r.value); });
+  });
+
+  // Mark each slider's factory default so a change is easy to undo by eye.
+  document.querySelectorAll('input[type=range][data-default]').forEach(function (r) {
+    const wrap = document.createElement('span');
+    wrap.className = 'range';
+    r.parentNode.insertBefore(wrap, r);
+    wrap.appendChild(r);
+    const tick = document.createElement('span');
+    tick.className = 'range-tick';
+    tick.title = r.dataset.default;
+    wrap.appendChild(tick);
+    const place = function () {
+      const w = r.clientWidth, th = 16;
+      const min = +r.min, max = +r.max, def = +r.dataset.default;
+      tick.style.left = (th / 2 + ((def - min) / (max - min)) * (w - th)) + 'px';
+    };
+    place();
+    r._placeTick = place;
+    window.addEventListener('resize', place);
+  });
+
+  // A switch or radio row responds anywhere on the row, not just on the 20 px control.
+  document.querySelectorAll('.row').forEach(function (row) {
+    const input = row.querySelector('input[type=checkbox], input[type=radio]');
+    if (!input) return;
+    row.addEventListener('click', function (e) {
+      if (e.target.closest('label, input, select, button')) return;  // the control handles itself
+      input.click();
+    });
+  });
+
+  // Position radios (mutually exclusive, and only one can be on).
+  document.querySelectorAll('input[data-pos]').forEach(function (r) {
+    r.checked = (String(v.beforeApps ? 1 : 0) === r.dataset.pos);
+    r.addEventListener('change', function () { if (r.checked) post('set:beforeApps=' + r.dataset.pos); });
+  });
+
+  document.getElementById('closeBtn').addEventListener('click', function () { post('cmd:close'); });
+
+  // Drag the window from the title bar; buttons inside it keep working.
+  const bar = document.getElementById('titlebar');
+  bar.addEventListener('mousedown', function (e) {
+    if (e.target.closest('button')) return;
+    if (e.button !== 0) return;
+    post('cmd:drag');
+  });
+
+  // The page should never scroll or zoom as a document.
+  window.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && ['+', '-', '=', '0'].includes(e.key)) e.preventDefault();
+  });
+})();
+</script>
+</body>
+</html>

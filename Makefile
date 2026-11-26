@@ -4,23 +4,49 @@ WINDRES  ?= windres
 VERSION  ?= 0.0.0
 CHANNEL  ?= dev
 .DEFAULT_GOAL := BatteryHub.exe
+LDFLAGS  ?= -municode -mwindows -static -s -Wl,--gc-sections -Lbuild
 CXXFLAGS ?= -std=c++17 -Os -Wall -Wno-missing-field-initializers -ffunction-sections -fdata-sections \
             -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -MMD -MP
-LDFLAGS  ?= -municode -mwindows -static -s -Wl,--gc-sections
-LIBS     := -ld2d1 -ldwrite -lhid -lsetupapi -lcfgmgr32 -lole32 -loleaut32 -lcomctl32 -lgdi32 -lruntimeobject -lws2_32 -lwinhttp -lbcrypt -lversion -lbluetoothapis -lwinmm
+LIBS     := -ld2d1 -ldwrite -lhid -lsetupapi -lcfgmgr32 -lole32 -loleaut32 -lcomctl32 -lgdi32 -lruntimeobject -lws2_32 -lwinhttp -lbcrypt -lversion -lbluetoothapis -lwinmm -lcomdlg32 -luxtheme -luuid -lshell32 -luser32 -mthreads
 
 SRC := $(wildcard src/*.cpp) $(wildcard src/drivers/*.cpp)
 OBJ := $(patsubst src/%.cpp,build/%.o,$(SRC)) build/app_res.o
 DEP := $(OBJ:.o=.d)
 
-BatteryHub.exe: $(OBJ)
+# The settings window renders an HTML page through WebView2; the SDK headers are vendored under
+# third_party/webview2 (the loader DLL itself is embedded as a resource, see res/app.rc).
+# third_party is not in the repository, so a fresh clone has to fetch it once.
+WV2_INCLUDE := third_party/webview2/include
+WV2_LOADER  := third_party/webview2/x64/WebView2Loader.dll
+WV2_CFLAGS  := -I$(WV2_INCLUDE)
+
+$(WV2_INCLUDE)/WebView2.h:
+	@echo "The WebView2 SDK is missing. Fetch it once with:"
+	@echo "    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-webview2.ps1"
+	@exit 1
+
+BatteryHub.exe: $(OBJ) | build/default-manifest.o
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LIBS)
+
+# GCC's specs add their own default-manifest.o when the name is found on the link path, which
+# collides with the Common Controls v6 manifest in res/app.rc. This stub takes its place so only the
+# RC manifest reaches the exe (without it TaskDialogIndirect has no entry point). The linker prints
+# ".rsrc merge failure: multiple non-default manifests" while doing this; it is expected and the
+# build still succeeds with the RC manifest in the exe.
+build/default-manifest.o:
+	@mkdir -p build
+	@echo "int __batteryhub_manifest_stub;" > build/manifest_stub.c
+	$(CXX) -c build/manifest_stub.c -o $@
+
+	@mkdir -p build
 
 # -MMD -MP writes the real header dependencies next to each object, so touching one header rebuilds
 # only the sources that include it instead of the whole tree.
 build/%.o: src/%.cpp build/version.h
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -municode -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(WV2_CFLAGS) -municode -c $< -o $@
+
+build/settings_panel.o: $(WV2_INCLUDE)/WebView2.h
 
 -include $(DEP)
 
@@ -42,7 +68,7 @@ build/languages.txt: $(wildcard lang/*.txt)
 	@mkdir -p build
 	@printf '' > $@; for f in $^; do printf '@file %s\n' "$$(basename $$f .txt)" >> $@; cat "$$f" >> $@; printf '\n' >> $@; done
 
-build/app_res.o: res/app.rc res/app.manifest res/app.ico res/app_light.ico res/MaterialIconsOutlined-Regular.otf build/languages.txt build/version.h
+build/app_res.o: res/app.rc res/app.manifest res/app.ico res/app_light.ico res/MaterialIconsOutlined-Regular.otf res/settings.html $(WV2_LOADER) $(WV2_INCLUDE)/WebView2.h build/languages.txt build/version.h
 	@mkdir -p build
 	$(WINDRES) -i $< -o $@ --include-dir res --include-dir build
 

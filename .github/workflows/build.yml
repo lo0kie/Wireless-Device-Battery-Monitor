@@ -35,6 +35,25 @@ jobs:
           "WB_VERSION=$version" >> $env:GITHUB_ENV
           "WB_CHANNEL=$channel" >> $env:GITHUB_ENV
 
+      - name: Fetch WebView2 SDK
+        shell: pwsh
+        run: |
+          # third_party is not in the repository (see .gitignore): the settings window needs the SDK
+          # headers and the loader DLL that res/app.rc embeds. Pinned version + checksum, like the
+          # bundled HeadsetControl binary.
+          $root = "third_party/webview2"
+          if (Test-Path "$root/include/WebView2.h") { return }
+          $ver = "1.0.4370.26"
+          $nupkg = "$root/wv2.zip"
+          New-Item -ItemType Directory -Force $root | Out-Null
+          Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/$ver/microsoft.web.webview2.$ver.nupkg" -OutFile $nupkg
+          if ((Get-FileHash $nupkg -Algorithm SHA256).Hash -ne '1C0DACAC84B70109B3FD42F90C53A0BA942ABC3A87590D7A4E0CCD86E4A06CF4') { throw 'WebView2 SDK checksum mismatch' }
+          Expand-Archive $nupkg -DestinationPath "$root/pkg" -Force
+          New-Item -ItemType Directory -Force "$root/include", "$root/x64" | Out-Null
+          Copy-Item "$root/pkg/build/native/include/WebView2.h", "$root/pkg/build/native/include/WebView2EnvironmentOptions.h" "$root/include/"
+          Copy-Item "$root/pkg/build/native/x64/WebView2Loader.dll" "$root/x64/"
+          Remove-Item $nupkg, "$root/pkg" -Recurse -Force
+
       - name: Build BatteryHub.exe
         shell: msys2 {0}
         run: make VERSION="$WB_VERSION" CHANNEL="$WB_CHANNEL"

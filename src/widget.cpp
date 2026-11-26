@@ -502,11 +502,9 @@ int TextGapPx() { return Pxf(g_textStyle.iconGap); }
 // Separator line thickness, and the gap between devices when the separator is on. One padding value
 // is used on both sides of the line, so together with the line it sets the device spacing.
 int DividerLineW() { return std::max(2, Px(2)); }
-int DividerPadPx() { return Pxf(g_textStyle.dividerGap); }
-int DividerGapPx() { return DividerPadPx() * 2 + DividerLineW(); }
-// Gap between neighbouring devices: with the separator on it is made of the two custom paddings
-// around the line, otherwise the ordinary device-spacing value is used.
-int DeviceGapPx(int base = 14) { return g_deviceDivider ? DividerGapPx() : GapPx(base); }
+// Gap between neighbouring devices. The separator is drawn centred inside this gap, so the device
+// spacing is the single control that decides it - whether or not the separator is on.
+int DeviceGapPx(int base = 14) { return GapPx(base); }
 
 // Grayscale coverage mask of a string, cropped to its ink bounds.
 struct Mask {
@@ -823,8 +821,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             y += lb.m.h + (lb.barPct >= 0 ? barRoom : 0) + blockGap;
             // Horizontal rule in the gap between two stacked device blocks, after the left (top) padding.
             if (g_deviceDivider && si + 1 < slots.size()) {
-                int ty = y - blockGap + DividerPadPx();
                 int dw = DividerLineW();
+                int ty = y - blockGap + std::max(0, blockGap - dw) / 2;
                 g_divs.push_back({ Px(10), ty, barW - Px(20), dw });
             }
         }
@@ -851,12 +849,11 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
             lb.py = top + iconH + rowGap;
             int deviceGap = DeviceGapPx(10);
             x += slotW + deviceGap;
-            // Vertical rule between two side-by-side device blocks: the gap is left padding + line +
-            // right padding, so place the line after the left padding rather than dead centre.
+            // Vertical rule between two side-by-side device blocks, centred in the gap.
             if (g_deviceDivider && si + 1 < slots.size()) {
-                int lx = x - deviceGap + DividerPadPx();
-                int dh = iconH + rowGap + textH;
                 int dw = DividerLineW();
+                int lx = x - deviceGap + std::max(0, deviceGap - dw) / 2;
+                int dh = iconH + rowGap + textH;
                 g_divs.push_back({ lx, top, dw, dh });
             }
         }
@@ -868,7 +865,7 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
     for (auto& p : out) {
         if (p.anchor < 0) {
             if (g_deviceDivider && p.deviceEnd && p.gapAfter > 0) {
-                int lx = flowX + p.m.w + DividerPadPx();
+                int lx = flowX + p.m.w + std::max(0, p.gapAfter - DividerLineW()) / 2;
                 int dh = Px(12);  // short rule centred in the strip
                 g_divs.push_back({ lx, (height - dh) / 2, DividerLineW(), dh });
             }
