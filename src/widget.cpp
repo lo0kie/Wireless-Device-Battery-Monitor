@@ -734,8 +734,9 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         }
         Rgb tc = it.low ? red : fg;
         bool mark = it.charging || it.full;  // bolt while charging, green check mark once full
-        // The connection mark is shown on every device, including offline ones -- for those it is
-        // the only hint left about how the device used to be connected. Charging wins over it.
+        // The connection mark is shown on every device. For an offline device it turns into a
+        // broken-link icon, so the mark reads as "was connected here, now dropped" instead of
+        // implying a live link. Charging wins over it.
         bool link = !mark && g_connectionIcons && it.link != LinkKind::None;
         size_t glyph = out.size();
         slots.push_back({ (int)glyph, (int)glyph + 1, mark || link ? (int)glyph + 2 : -1 });
@@ -759,7 +760,8 @@ std::vector<Piece> Layout(int barW, int barH, int& width, int& height) {
         out.push_back(std::move(label));
         if (mark) out.push_back({ RenderMask(std::wstring(1, it.full ? icons::G().check : icons::G().bolt), boltFont, g_light), it.full ? full : charge, a, 0 });
         else if (link) {
-            const wchar_t g = it.link == LinkKind::Bluetooth ? icons::G().bluetooth
+            const wchar_t g = it.offline                       ? icons::G().offline
+                            : it.link == LinkKind::Bluetooth ? icons::G().bluetooth
                             : it.link == LinkKind::Wired      ? icons::G().usb
                                                               : icons::G().wifi;
             out.push_back({ RenderMask(std::wstring(1, g), boltFont, g_light), fg, a * 160 / 255, 0 });

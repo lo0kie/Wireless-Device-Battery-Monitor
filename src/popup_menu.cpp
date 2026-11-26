@@ -17,6 +17,7 @@
 
 #include <d2d1.h>
 #include <dwrite.h>
+#include <dwrite_1.h>
 #include <mmsystem.h>  // timeBeginPeriod: raise the timer resolution while a menu is open
 
 namespace popup_menu {
@@ -257,8 +258,9 @@ struct Theme {
     int pad = 8, rowInset = 12, checkW = 18, chevW = 12, colGap = 8;  // spacing 8dp / item padding 12dp / icons 18dp 12dp
     int radius = 8, pillRadius = 4, minWidth = 180, maxWidth = 320;   // shape corner-small 8dp / extra-small 4dp
     int textH = 14, headerTextH = 12, iconSize = 40;          // Label Large 14sp / Label Medium 12sp
+    int shadow = 12;                                          // soft drop shadow reach, 96-dpi px (scaled in MakeTheme)
     Motion motion;                                            // M3 motion tokens (durations/easing/scale/corner)
-    Rgba panel, border, text, muted, disabled, hover, mark, scrollBar, sep, accent;
+    Rgba panel, border, text, muted, disabled, hover, mark, scrollBar, sep, accent, shadowColor;
     Com<IDWriteTextFormat> textFmt, textFmtRtl, headerFmt, headerFmtRtl;
     HFONT iconFont = nullptr;  // GDI on purpose: see the note in MakeTheme
     bool light = true;
@@ -311,6 +313,7 @@ void MakeTheme(Theme& t, UINT dpi, bool light) {
     t.colGap = px(8);       // spacing 2
     t.radius = px(8);       // shape corner-small: menus 8dp
     t.pillRadius = px(4);   // shape corner-extra-small: 4dp
+    t.shadow = px(12);      // soft drop-shadow reach: 12dp
     t.minWidth = px(180);
     t.maxWidth = px(320);
     t.textH = px(14);       // Label Large: 14sp / 20sp line
@@ -384,6 +387,7 @@ void MakeTheme(Theme& t, UINT dpi, bool light) {
         t.scrollBar = Rgba{ onSurfaceVar.r, onSurfaceVar.g, onSurfaceVar.b, 96 };
         t.sep = Rgba{ outline.r, outline.g, outline.b, 96 };
     }
+    t.shadowColor = Rgba{ 0, 0, 0, 255 };  // base colour; DropShadow scales alpha per layer
 }
 
 // ---- painter -----------------------------------------------------------------------------------
@@ -458,6 +462,28 @@ struct Painter {
         rt->DrawRoundedRectangle(&rr, b, width);
     }
 
+    // Soft drop shadow as concentric translucent rounded rects, widest and faintest at the outside.
+    // Drawn behind the panel; no effect API needed, and it composes correctly in a layered window.
+    void DropShadow(const D2D1_RECT_F& panel, float radius, int reach, Rgba color) {
+        if (reach <= 0) return;
+        Com<ID2D1SolidColorBrush> b;
+        if (FAILED(rt->CreateSolidColorBrush(Col(color), b.put()))) return;
+        const int layers = 4;
+        for (int i = layers; i >= 1; --i) {
+            const float spread = (float)reach * i / layers;
+            const float fade = (float)i / layers;
+            const D2D1_RECT_F r{ panel.left - spread, panel.top - spread,
+                                 panel.right + spread, panel.bottom + spread };
+            D2D1_ROUNDED_RECT rr{ r, radius + spread, radius + spread };
+            // Outermost is faintest; opacity grows toward the panel. Kept deliberately light for a
+            // subtle M3 elevation hint rather than a heavy drop.
+            D2D1_COLOR_F c = Col(color);
+            c.a *= 0.03f * (1.0f - fade) + 0.008f;
+            b->SetColor(c);
+            rt->FillRoundedRectangle(&rr, b.get());
+        }
+    }
+
     void Line(float x0, float y0, float x1, float y1, float width, ID2D1Brush* b) {
         rt->DrawLine(D2D1_POINT_2F{ x0, y0 }, D2D1_POINT_2F{ x1, y1 }, b, width);
     }
@@ -496,6 +522,8 @@ struct Popup {
     std::vector<RowDraw> draw;  // one per row: layouts for the icon and the label
     std::vector<int> seps;      // y of every separator, so the hairline can be drawn
     int width = 0, height = 0, contentH = 0;
+    int shadow = 0;                     // extra pixels around the panel for the drop shadow
+    int totalW = 0, totalH = 0;         // window / surface size = panel + 2 * shadow
     int scroll = 0, maxScroll = 0;
     // Smooth scroll: `scroll` is the painted offset, `scrollTarget` is where wheel/drag wants it;
     // a timer eases scroll toward the target with the M3 standard-decelerate curve.
@@ -548,11 +576,23 @@ bool ScrollBarHit(Popup& p, POINT screen, int& grab);
 
 // ---- layout ------------------------------------------------------------------------------------
 
+// 0.2 px of tracking on every menu label, applied at layout time so measurement and painting agree.
+// DirectWrite tracks via character spacing on IDWriteTextLayout1: half a pixel before and after each
+// glyph yields 0.2 px between neighbours; the minimum advance keeps very narrow glyphs from collapsing.
+constexpr float kLetterSpacing = 0.2f;
+void ApplyLetterSpacing(IDWriteTextLayout* layout, size_t length) {
+    Com<IDWriteTextLayout1> l1;
+    if (FAILED(layout->QueryInterface(IID_PPV_ARGS(l1.put())))) return;
+    const DWRITE_TEXT_RANGE all{ 0, (UINT32)length };
+    l1->SetCharacterSpacing(kLetterSpacing / 2, kLetterSpacing / 2, kLetterSpacing / 2, all);
+}
+
 // Width of a single-line run, or -1 when DirectWrite could not lay it out.
 int TextWidth(IDWriteFactory* dw, IDWriteTextFormat* fmt, const std::wstring& text, int limit, int rowH) {
     Com<IDWriteTextLayout> layout;
     if (FAILED(dw->CreateTextLayout(text.c_str(), (UINT32)text.size(), fmt, (FLOAT)limit, (FLOAT)rowH, layout.put())))
         return -1;
+    ApplyLetterSpacing(layout.get(), text.size());
     DWRITE_TEXT_METRICS m{};
     if (FAILED(layout->GetMetrics(&m))) return -1;
     return (int)ceilf(m.widthIncludingTrailingWhitespace);
@@ -709,7 +749,8 @@ void BuildTextInto(const Theme& t, IDWriteTextLayout** out, const std::wstring& 
         if (lo > 0 && lo < text.size() && text[lo - 1] >= 0xD800 && text[lo - 1] <= 0xDBFF) lo--;
         text = text.substr(0, lo) + tail;
     }
-    dw->CreateTextLayout(text.c_str(), (UINT32)text.size(), fmt, (FLOAT)limit, (FLOAT)rowH, out);
+    if (FAILED(dw->CreateTextLayout(text.c_str(), (UINT32)text.size(), fmt, (FLOAT)limit, (FLOAT)rowH, out))) return;
+    ApplyLetterSpacing(*out, text.size());
 }
 
 void BuildText(const Theme& t, Com<IDWriteTextLayout>& out, const std::wstring& value, const Item& it,
@@ -824,18 +865,23 @@ void DrawRow(Session& s, Popup& p, int rowIdx, int y, Painter& g) {
 void PaintPopup(Session& s, Popup& p, float scale = 1.0f,
                 D2D1_POINT_2F anchor = { 0, 0 }, int corner = -1) {
     const Theme& t = s.theme;
-    if (p.surface.w != p.width || p.surface.h != p.height) {
-        if (!p.surface.Create(p.width, p.height)) return;
+    if (p.surface.w != p.totalW || p.surface.h != p.totalH) {
+        if (!p.surface.Create(p.totalW, p.totalH)) return;
     }
     Painter g;
     if (!g.Begin(p.surface, t)) {
         g.End();
         return;
     }
+    // Draw in panel coordinates: shift by the shadow margin so all row/scrollbar/anchor math stays
+    // in the panel space the hit-tests use. The shadow itself is painted in the surrounding margin.
+    g.rt->SetTransform(D2D1::Matrix3x2F::Translation((float)p.shadow, (float)p.shadow));
     if (scale != 1.0f)
-        g.rt->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale, D2D1_POINT_2F{ anchor.x, anchor.y }));
+        g.rt->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale, D2D1_POINT_2F{ anchor.x, anchor.y }) *
+                           D2D1::Matrix3x2F::Translation((float)p.shadow, (float)p.shadow));
     const float r = (float)(corner >= 0 ? corner : t.radius);
     const D2D1_RECT_F panel{ 0.5f, 0.5f, (float)p.width - 0.5f, (float)p.height - 0.5f };
+    g.DropShadow(panel, r, p.shadow, t.shadowColor);
     g.FillRound(panel, r, g.panel.get());
     g.StrokeRound(panel, r, 1.0f, g.border.get());
 
@@ -873,7 +919,7 @@ void Flush(Popup& p, int alpha = 255) {
     if (!p.hwnd || !p.surface.dc) return;
     HDC screen = GetDC(nullptr);
     POINT src{ 0, 0 };
-    SIZE size{ p.width, p.height };
+    SIZE size{ p.totalW, p.totalH };
     BLENDFUNCTION bf{ AC_SRC_OVER, 0, (BYTE)ClampI(alpha, 0, 255), AC_SRC_ALPHA };
     UpdateLayeredWindow(p.hwnd, screen, nullptr, &size, p.surface.dc, &src, 0, &bf, ULW_ALPHA);
     ReleaseDC(nullptr, screen);
@@ -974,6 +1020,12 @@ void AnimateExit(Session& s) {
 RECT WindowRect(Popup& p) {
     RECT r{};
     if (p.hwnd) GetWindowRect(p.hwnd, &r);
+    // The window carries an invisible shadow margin; every hit-test and row placement works in the
+    // panel's coordinate space, so report the panel rectangle (the window inset by the margin).
+    r.left += p.shadow;
+    r.top += p.shadow;
+    r.right -= p.shadow;
+    r.bottom -= p.shadow;
     return r;
 }
 
@@ -1143,7 +1195,10 @@ void PlaceSubmenu(Session& s, Popup& parent, Popup& child, int rowIdx) {
     if (y < work.top) y = work.top;
     if (x < work.left) x = work.left;
     if (x + child.width > work.right) x = work.right - child.width;
-    SetWindowPos(child.hwnd, HWND_TOP, x, y, child.width, child.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    // TOPMOST like the root, not HWND_TOP: a HWND_TOP child would sit below the topmost parent and
+    // be hidden where they overlap. Later-placed submenus land above earlier ones, so level 2 < 3.
+    SetWindowPos(child.hwnd, HWND_TOPMOST, x - child.shadow, y - child.shadow,
+                 child.totalW, child.totalH, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 Popup* NewPopup(Session& s, const std::vector<Item>& items, Popup* parent, int parentIndex);
@@ -1206,10 +1261,13 @@ Popup* NewPopup(Session& s, const std::vector<Item>& items, Popup* parent, int p
         maxH = MinI(maxH, MulDiv(s.opt.maxHeight, s.theme.scale, 96));
     p->height = MinI(p->contentH, maxH);
     p->maxScroll = MaxI(0, p->contentH - p->height);
+    p->shadow = s.theme.shadow;
+    p->totalW = p->width + 2 * p->shadow;
+    p->totalH = p->height + 2 * p->shadow;
 
     DWORD ex = WS_EX_LAYERED | WS_EX_TOOLWINDOW;
     if (parent) ex |= WS_EX_NOACTIVATE;
-    p->hwnd = CreateWindowExW(ex, kClassName, L"", WS_POPUP, 0, 0, p->width, p->height, nullptr, nullptr,
+    p->hwnd = CreateWindowExW(ex, kClassName, L"", WS_POPUP, 0, 0, p->totalW, p->totalH, nullptr, nullptr,
                               GetModuleHandleW(nullptr), p);
     if (!p->hwnd) {
         delete p;
@@ -1245,7 +1303,8 @@ void PlaceRoot(Session& s, Popup& p) {
     if (x < work.left + margin) x = work.left + margin;
     if (y < work.top + margin) y = work.top + margin;
     if (y + p.height > work.bottom - margin) y = work.bottom - margin - p.height;
-    SetWindowPos(p.hwnd, HWND_TOPMOST, x, y, p.width, p.height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    SetWindowPos(p.hwnd, HWND_TOPMOST, x - p.shadow, y - p.shadow,
+                 p.totalW, p.totalH, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 // A row gets the hand cursor only when clicking it runs a command. Rows that merely expand a

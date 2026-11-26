@@ -19,6 +19,7 @@ struct WidgetItem {
     bool full     = false;  // on power and fully charged: a green check mark instead of the bolt
     bool dim      = false;  // asleep / stale value
     bool low      = false;
+    bool offline  = false;  // disconnected: the connection mark becomes a broken-link icon
     bool bluetooth = false;  // picks the Bluetooth icon when the device type is unknown
     LinkKind link = LinkKind::None;  // small mark after the level showing how it is connected (opt-in)
     std::wstring label;      // tiny caption on the icon; set only when two devices of one kind are shown

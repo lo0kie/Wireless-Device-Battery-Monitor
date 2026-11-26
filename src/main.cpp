@@ -808,8 +808,9 @@ void UpdateWidget() {
         it.full = !offline && (e->st.full || (e->st.charging && it.percent >= 100));
         it.dim = ShouldDim(e->st);
         it.low = !offline && !it.charging && it.percent >= 0 && it.percent <= LOW_BATTERY;
+        it.offline = offline;
         it.bluetooth = e->st.via == L"Bluetooth";
-        it.link = LinkFor(e->st.via);  // keep the mark even when offline, so a dropped device still says how it was connected
+        it.link = LinkFor(e->st.via);  // kept offline too: the widget shows a broken link instead of the live mark
         it.label = labels[items.size()];
         it.accent = AccentFor(e->st);
         items.push_back(it);
