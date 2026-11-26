@@ -75,9 +75,6 @@ enum class VerticalPlace { Auto, Top, AboveTray, Bottom };
 void SetVerticalPlace(VerticalPlace place);
 // True while the widget is on a left / right taskbar.
 bool Vertical();
-// At the left end of a Windows 11 taskbar (right of the Widgets button) instead of next to the clock, where
-// there is room; otherwise next to the clock as usual (kept across Create/Destroy).
-void SetFarLeft(bool on);
 // Just left of the taskbar apps (Start / Widgets) on a centred Windows 11 taskbar, where there is room;
 // otherwise next to the clock as usual (kept across Create/Destroy).
 void SetBeforeApps(bool on);

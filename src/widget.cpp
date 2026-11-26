@@ -24,7 +24,6 @@ bool g_showTooltip = true;  // hover tip listing device levels (menu option)
 bool g_vertical;    // the primary taskbar is docked left or right: one block per device, stacked (PR #321)
 bool g_makeRoom = true;  // step past other apps' widgets in the taskbar instead of covering them
 widget::VerticalPlace g_place = widget::VerticalPlace::Auto;  // where the column sits on such a taskbar (menu option)
-bool g_farLeft;     // at the left end of the taskbar instead of next to the clock (menu option)
 bool g_beforeApps;  // just left of Start / the first task button, centred taskbar (menu option, PR #760)
 widget::TextStyle g_textStyle;  // user-selected text font, size, letter spacing and device spacing
 std::vector<WidgetItem> g_items;
@@ -1130,7 +1129,7 @@ void PositionMirror(Mirror& m) {
         ERROR_SUCCESS)
         right -= Px((int)offset);
     int left = right - length - Px(2), farX = 0;
-    bool atFarLeft = !v && (g_farLeft || g_beforeApps) && FarLeftX(m.bar, m.size.cx, farX);  // horizontal bars only
+    bool atFarLeft = !v && g_beforeApps && FarLeftX(m.bar, m.size.cx, farX);  // horizontal bars only
     if (atFarLeft) left = farX;
     g_dpiBar = nullptr;
     if (!atFarLeft && (!known || length <= 0 || left < minLeft)) { HideMirror(m); return; }
@@ -1498,17 +1497,11 @@ void SetVerticalPlace(VerticalPlace place) {
 bool Vertical() { return g_wnd && g_vertical; }
 
 void ApplyLeftSpot() {
-    bool on = g_farLeft || g_beforeApps;
     AcquireSRWLockExclusive(&g_wbLock);
-    g_wbFarLeft = on;  // measure the primary taskbar too
+    g_wbFarLeft = g_beforeApps;  // measure the primary taskbar too
     ReleaseSRWLockExclusive(&g_wbLock);
-    if (on && g_wbWake) SetEvent(g_wbWake);  // measure the taskbar now, not in 5 s
+    if (g_beforeApps && g_wbWake) SetEvent(g_wbWake);  // measure the taskbar now, not in 5 s
     if (g_wnd) Reposition();
-}
-
-void SetFarLeft(bool on) {
-    g_farLeft = on;
-    ApplyLeftSpot();
 }
 
 void SetBeforeApps(bool on) {
@@ -1708,29 +1701,31 @@ bool Reposition() {
     int left = p.x - g_size.cx - Px(2);
 
 
-    // Optional user override in DPI-independent pixels (e.g. for custom padding).
-    DWORD customOffset = 0, sz = sizeof(customOffset);
-    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\WirelessBattery", L"TaskbarOffset",
-                     RRF_RT_REG_DWORD, nullptr, &customOffset, &sz) == ERROR_SUCCESS) {
-        left -= Px((int)customOffset);
-    }
-
-    // Clamp only out-of-range positions. At x=0 the widget can be obscured by Start/XAML,
-    // so prefer its previous valid position or the space beside a normally anchored tray (#2993).
+    // Horizontal offset: the strip's left edge relative to the taskbar's left edge, in DPI-independent
+    // pixels. 0 (or no setting) pins it to the far left. This replaces the old distance-from-the-tray
+    // value plus the separate far-left toggle -- one number now drives the horizontal position.
+    // Vertical, mirrored and secondary bars keep their own offset meanings.
+    DWORD horizOffset = 0, hsz = sizeof(horizOffset);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\WirelessBattery", L"TaskbarOffset",
+                 RRF_RT_REG_DWORD, nullptr, &horizOffset, &hsz);
     RECT taskbarClient{};
-    if (GetClientRect(g_taskbar, &taskbarClient)) {
-        left = RecoverHorizontalWidgetX(left, g_size.cx, taskbarClient.right - taskbarClient.left,
-                                        tr.right - tr.left, g_lastLeft, Px(2));
-    } else if (left < 0 && g_lastLeft >= 0) {
-        left = g_lastLeft;
-    }
+    GetClientRect(g_taskbar, &taskbarClient);
+    POINT fp{ bar.left + Px(4) + Px((int)horizOffset), bar.top };
+    ScreenToClient(g_taskbar, &fp);
+    // A hand-entered offset must not push the strip outside the bar.
+    left = (int)std::clamp(fp.x, 0L, std::max<LONG>(0, taskbarClient.right - g_size.cx));
 
-    int farX = 0;
-    bool atFarLeft = !rtl && (g_farLeft || g_beforeApps) && FarLeftX(g_taskbar, g_size.cx, farX);
-    if (atFarLeft) {
-        POINT fp{ farX, bar.top };
-        ScreenToClient(g_taskbar, &fp);
-        left = fp.x;
+    // "Just before apps" keeps the measured path because its whole meaning depends on that edge.
+    bool atFarLeft = false;
+    if (!rtl && g_beforeApps) {
+        int farX = 0;
+        atFarLeft = FarLeftX(g_taskbar, g_size.cx, farX);
+        if (atFarLeft) {
+            // The shared offset tunes this base spot too: positive nudges right, same as the left end.
+            POINT got{ farX + Px((int)horizOffset), bar.top };
+            ScreenToClient(g_taskbar, &got);
+            left = got.x;
+        }
     }
 
     // Windows 10: Explorer re-expands the task buttons on its own layout passes; narrow them again.

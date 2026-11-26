@@ -57,7 +57,7 @@ LRESULT CALLBACK OffsetProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             const int dpi = (int)GetDpiForWindow(hwnd);
             auto s = [dpi](int v) { return MulDiv(v, dpi, 96); };
             HWND label = CreateWindowExW(0, L"STATIC",
-                                         T(L"Pixels from the notification area (negative moves it closer):"),
+                                         T(L"Horizontal offset in pixels (0 = left end):"),
                                          WS_CHILD | WS_VISIBLE, s(dlg::kPad), s(10), s(kFieldW), s(dlg::kLabelH),
                                          hwnd, nullptr, inst, nullptr);
             state->edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", std::to_wstring(state->initial).c_str(),

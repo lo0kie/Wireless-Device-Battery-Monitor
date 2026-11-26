@@ -63,9 +63,9 @@ constexpr UINT ALERT_ICON_ID = 2;
 enum MenuId : UINT {
     ID_REFRESH = 100, ID_AUTOSTART, ID_HIDE_LAST_KNOWN, ID_WIDGET_BACKGROUND, ID_EXIT, ID_MODE_WIDGET, ID_MODE_TRAY, ID_SUPPORT, ID_REPORT,
     ID_BRAND_COLORS, ID_STACKED, ID_DEVICE_DIVIDER, ID_SHOW_TOOLTIP, ID_SHOW_DISCONNECTED, ID_RECORD_HISTORY, ID_DIM_SLEEPING,
-    ID_TRAY_WHEN_EMPTY, ID_MAKE_ROOM, ID_FAR_LEFT, ID_PERCENT_SIGN, ID_RING_STYLE, ID_BEFORE_APPS, ID_CONNECTION_ICONS, ID_KEEP_MOUSE_LAST_KNOWN,
+    ID_TRAY_WHEN_EMPTY, ID_MAKE_ROOM, ID_PERCENT_SIGN, ID_RING_STYLE, ID_CONNECTION_ICONS, ID_KEEP_MOUSE_LAST_KNOWN,
     ID_PLACE_AUTO, ID_PLACE_TOP, ID_PLACE_TRAY, ID_PLACE_BOTTOM, ID_TEXT_STYLE,  // "Position on a vertical taskbar"
-    ID_POSITION_FIRST = 700,  // "Position on the taskbar": ID_POSITION_FIRST + 0..5, then the custom value
+    ID_POSITION_FIRST = 700,  // "Position on the taskbar": 0=left end, 1=before apps, 2=custom offset
     ID_POLL_FIRST = 500,  // "Check battery every": ID_POLL_FIRST + 0..7
     ID_LIMIT_OFF = 600, ID_LIMIT_FIRST,  // "Notify when charged to": off, then alerts::kChargeLimits
     ID_UPDATE = 200, ID_AUTO_UPDATE,
@@ -99,8 +99,8 @@ bool g_useWidget = false;      // what is actually shown right now
 bool g_hideLastKnown = false;  // hide (last known) / asleep devices from taskbar and tray
 bool g_trayWhenEmpty = false;  // taskbar mode: swap the strip for the tray placeholder while no device is shown
 bool g_emptyToTray = false;    // that swap is in effect right now
-bool g_showDisconnectedDevices = false;  // opt-in, explicit driver-reported offline devices only
-bool g_dimSleeping = true;  // dim a sleeping device's last known value (menu option, on by default)
+bool g_showDisconnectedDevices = false;  // opt-in: show sleeping / disconnected devices (registry key kept for compatibility)
+bool g_dimSleeping = true;  // dim sleeping / disconnected devices' last value (menu option, on by default)
 bool g_recordHistory = true;  // save readings for "Battery history..." (menu option, on by default)
 int g_chargeLimit = 0;        // "Notify when charged to" 80/85/90%, 0 = off (the default)
 std::wstring g_widgetMonitor = L"all";  // which taskbars show the widget: "all", "main" or one monitor id
@@ -115,9 +115,9 @@ bool g_showTooltip = true;       // hover tip listing device levels (menu option
 bool g_makeRoom = true;      // step past other apps' taskbar widgets (menu option)
 // "Position on the taskbar": distance from the notification area in DPI-independent pixels. Stored as
 // the TaskbarOffset value the widget has always read, so a value set by hand keeps working.
-const int POSITION_OFFSETS[] = { 0, 40, 80, 120, 160, 200 };
+// Only the two positions worth pinning: beside the notification area, or a custom offset typed in.
+// The fixed 40/80/120... presets were removed; every value in between is available via Custom.
 widget::VerticalPlace g_verticalPlace = widget::VerticalPlace::Auto;  // column position on a left / right taskbar
-bool g_farLeft = false;      // widget at the left end of the taskbar instead of next to the clock (menu option)
 bool g_beforeApps = false;   // widget just left of the taskbar apps (menu option, PR #760)
 bool g_keepMouseLastKnown = false;  // with "Hide last known", still show mice (menu option, PR #1422)
 bool g_brandColors = false;  // off by default; known brands get their color (Razer green, Logitech blue, ...)
@@ -266,18 +266,18 @@ void RestoreKnownDevices() {
 
 bool IsEntryHidden(const TrayEntry& e) {
     if (IsHidden(e.st.key)) return true;
-    // An explicitly offline device is not just a stale battery reading.
-    if (g_showDisconnectedDevices && !e.st.connected) return false;
+    // Showing sleeping/disconnected devices overrides the hide-last-known rule for both kinds.
+    if (g_showDisconnectedDevices && (!e.st.connected || e.st.asleep)) return false;
     // A mouse sleeps between uses; its last level stays useful (PR #1422, opt-in).
     if (g_hideLastKnown && g_keepMouseLastKnown && e.st.kind == DeviceKind::Mouse && e.lastPct >= 0) return false;
     return g_hideLastKnown && (e.st.asleep || (e.st.percent < 0 && e.lastPct >= 0));
 }
 
 bool ShouldDim(const DeviceStatus& s) {
-    // An explicitly offline device keeps its dimmed "x", whatever the sleeping-device choice is.
-    if (!s.connected) return true;
-    // A sleeping device has no fresh reading: keep the last one, optionally at full brightness.
-    if (s.asleep && !g_dimSleeping) return false;
+    // One switch now covers both sleeping and disconnected devices: when it is off, neither is dimmed.
+    if (!g_dimSleeping && (s.asleep || !s.connected)) return false;
+    // With the switch on, an inactive device shows its last value (or "x") at reduced brightness.
+    if (s.asleep || !s.connected) return true;
     return s.percent < 0;
 }
 
@@ -449,8 +449,6 @@ void SaveVerticalPlace(widget::VerticalPlace p) {
               : p == widget::VerticalPlace::Bottom ? 3 : 0;
     RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"VerticalPlace", REG_DWORD, &v, sizeof(v));
 }
-bool LoadFarLeft() { return LoadBoolSetting(L"WidgetFarLeft", false); }
-void SaveFarLeft(bool on) { SaveBoolSetting(L"WidgetFarLeft", on); }
 bool LoadBeforeApps() { return LoadBoolSetting(L"WidgetBeforeApps", false); }
 void SaveBeforeApps(bool on) { SaveBoolSetting(L"WidgetBeforeApps", on); }
 bool LoadBrandColors() { return LoadBoolSetting(L"BrandColors", false); }
@@ -1116,12 +1114,6 @@ void SetBeforeApps(bool on) {
     widget::SetBeforeApps(on);
 }
 
-void SetFarLeft(bool on) {
-    g_farLeft = on;
-    SaveFarLeft(on);
-    widget::SetFarLeft(on);
-}
-
 void SetBrandColors(bool on) {
     g_brandColors = on;
     SaveBrandColors(on);
@@ -1411,41 +1403,29 @@ void ShowMenu(bool settings) {
     }
     {
         std::vector<Item> sub;
-        const UINT count = ARRAYSIZE(POSITION_OFFSETS);
         const int current = LoadTaskbarOffset();
-        UINT checked = ID_POSITION_FIRST + count;
-        for (UINT i = 0; i < count; i++) {
-            int px = POSITION_OFFSETS[i];
-            Item it = raw(px ? TF(L"{px} px from the notification area", { { L"px", std::to_wstring(px) } })
-                             : T(L"Next to the notification area"),
-                          ID_POSITION_FIRST + i);
-            it.checked = px == current;
-            it.disabled = !g_wantWidget;
-            sub.push_back(dot(it));
-            if (px == current) checked = ID_POSITION_FIRST + i;
-        }
-        // Any other value (typed in, or set by hand in the registry) shows as the custom entry.
-        std::wstring custom = checked == ID_POSITION_FIRST + count
-                                  ? TF(L"Custom ({px} px)...", { { L"px", std::to_wstring(current) } })
-                                  : std::wstring(T(L"Custom..."));
-        Item it = raw(custom, ID_POSITION_FIRST + count);
-        it.checked = checked == ID_POSITION_FIRST + count;
+        // Two mutually exclusive base spots, both tuned by the same offset set below.
+        Item left = raw(T(L"At the left end of the taskbar"), ID_POSITION_FIRST + 0);
+        left.checked = !g_beforeApps;
+        left.disabled = !g_wantWidget;
+        sub.push_back(dot(left));
+        Item before = raw(T(L"Just before the taskbar apps"), ID_POSITION_FIRST + 1);
+        before.checked = g_beforeApps;
+        before.disabled = !g_wantWidget;
+        sub.push_back(dot(before));
+        sub.push_back(sep());
+        // Shared offset: a positive value nudges the strip to the right from either base spot.
+        std::wstring custom = current
+                                  ? TF(L"Custom offset ({px} px)...", { { L"px", std::to_wstring(current) } })
+                                  : std::wstring(T(L"Custom offset..."));
+        Item it = raw(custom, ID_POSITION_FIRST + 2);
         it.disabled = !g_wantWidget;
-        sub.push_back(dot(it));
+        sub.push_back(it);
         sub.push_back(sep());
         Item room = raw(T(L"Make room for other taskbar widgets"), ID_MAKE_ROOM);
         room.checked = g_makeRoom;
         room.disabled = !g_wantWidget;
         sub.push_back(room);
-        sub.push_back(sep());
-        Item farLeft = raw(T(L"At the left end of the taskbar"), ID_FAR_LEFT);
-        farLeft.checked = g_farLeft;
-        farLeft.disabled = !g_wantWidget;
-        sub.push_back(farLeft);
-        Item before = raw(T(L"Just before the taskbar apps"), ID_BEFORE_APPS);
-        before.checked = g_beforeApps;
-        before.disabled = !g_wantWidget;
-        sub.push_back(before);
         Item item = raw(T(L"Position on the taskbar"), 0);
         item.children = std::move(sub);
         item.disabled = !g_wantWidget;
@@ -1522,10 +1502,10 @@ void ShowMenu(bool settings) {
         keep.disabled = !g_hideLastKnown;
         display.push_back(keep);
         display.push_back(sep());
-        Item disconnected = raw(T(L"Show disconnected devices"), ID_SHOW_DISCONNECTED);
+        Item disconnected = raw(T(L"Show sleeping / disconnected devices"), ID_SHOW_DISCONNECTED);
         disconnected.checked = g_showDisconnectedDevices;
         display.push_back(disconnected);
-        Item dim = raw(T(L"Dim sleeping devices"), ID_DIM_SLEEPING);
+        Item dim = raw(T(L"Dim sleeping / disconnected devices"), ID_DIM_SLEEPING);
         dim.checked = g_dimSleeping;
         display.push_back(dim);
     }
@@ -1657,14 +1637,15 @@ void ShowMenu(bool settings) {
         case ID_PLACE_TOP: SetWidgetPlace(widget::VerticalPlace::Top); break;
         case ID_PLACE_TRAY: SetWidgetPlace(widget::VerticalPlace::AboveTray); break;
         case ID_PLACE_BOTTOM: SetWidgetPlace(widget::VerticalPlace::Bottom); break;
-        case ID_FAR_LEFT:  // the two left spots exclude each other
-            if (!g_farLeft && g_beforeApps) SetBeforeApps(false);
-            SetFarLeft(!g_farLeft);
+        case ID_POSITION_FIRST + 0: SetBeforeApps(false); break;
+        case ID_POSITION_FIRST + 1: SetBeforeApps(true); break;
+        case ID_POSITION_FIRST + 2: {
+            int px = 0;
+            if (PromptTaskbarOffset(g_hwnd, L"Position on the taskbar", LoadTaskbarOffset(), px,
+                                    [](int v) { SetTaskbarOffset(v); }))
+                SetTaskbarOffset(px);
             break;
-        case ID_BEFORE_APPS:
-            if (!g_beforeApps && g_farLeft) SetFarLeft(false);
-            SetBeforeApps(!g_beforeApps);
-            break;
+        }
         case ID_MODE_WIDGET: SetMode(true); break;
         case ID_MODE_TRAY: SetMode(false); break;
         case ID_SUPPORT: ShellExecuteW(nullptr, L"open", L"https://github.com/sponsors/krisgfx9", nullptr, nullptr, SW_SHOWNORMAL); break;
@@ -1673,17 +1654,6 @@ void ShowMenu(bool settings) {
         case ID_AUTO_UPDATE: updates::ToggleAutomatic(); break;
         case ID_EXIT: DestroyWindow(g_hwnd); break;
         default:
-            if (cmd >= ID_POSITION_FIRST && cmd < ID_POSITION_FIRST + ARRAYSIZE(POSITION_OFFSETS)) {
-                SetTaskbarOffset(POSITION_OFFSETS[cmd - ID_POSITION_FIRST]);
-                break;
-            }
-            if (cmd == ID_POSITION_FIRST + ARRAYSIZE(POSITION_OFFSETS)) {
-                int px = 0;
-                if (PromptTaskbarOffset(g_hwnd, L"Position on the taskbar", LoadTaskbarOffset(), px,
-                                        [](int v) { SetTaskbarOffset(v); }))
-                    SetTaskbarOffset(px);
-                break;
-            }
             if (cmd >= ID_LIMIT_FIRST && cmd < ID_LIMIT_FIRST + (UINT)alerts::kChargeLimitCount) {
                 SetChargeLimit(alerts::kChargeLimits[cmd - ID_LIMIT_FIRST]);
             } else if (cmd >= ID_POLL_FIRST && cmd < ID_POLL_FIRST + ARRAYSIZE(POLL_SECONDS)) {
@@ -2155,7 +2125,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     g_stacked = LoadStacked();
     g_makeRoom = LoadMakeRoom();
     widget::SetMakeRoom(g_makeRoom);
-    g_farLeft = LoadFarLeft();
     g_pollIntervalMs = LoadPollSeconds() * 1000;
     widget::SetStacked(g_stacked);
     g_showPercentSign = LoadShowPercentSign();
@@ -2172,8 +2141,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int) {
     widget::SetTooltip(g_showTooltip);
     g_verticalPlace = LoadVerticalPlace();
     widget::SetVerticalPlace(g_verticalPlace);
-    widget::SetFarLeft(g_farLeft);
-    g_beforeApps = LoadBeforeApps() && !g_farLeft;
+    g_beforeApps = LoadBeforeApps();
     widget::SetBeforeApps(g_beforeApps);
     widget::SetBackground(g_widgetBackground);  // remembered by the widget across re-creation
     i18n::Init();
