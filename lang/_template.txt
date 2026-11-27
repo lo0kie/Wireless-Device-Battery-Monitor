@@ -286,3 +286,7 @@ Settings... =
 Automatic = 
 Bottom of the taskbar = 
 Loading = 
+just now = 
+{seconds} s ago = 
+{minutes} min ago = 
+{hours} h ago = 

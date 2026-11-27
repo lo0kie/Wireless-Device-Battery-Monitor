@@ -282,3 +282,7 @@ Settings... = 設定...
 Automatic = 自動
 Bottom of the taskbar = 工作列底部
 Loading = 載入中
+just now = 剛剛
+{seconds} s ago = {seconds} 秒前
+{minutes} min ago = {minutes} 分鐘前
+{hours} h ago = {hours} 小時前

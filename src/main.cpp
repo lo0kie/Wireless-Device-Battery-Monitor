@@ -123,6 +123,10 @@ widget::VerticalPlace g_verticalPlace = widget::VerticalPlace::Auto;  // column 
 bool g_beforeApps = false;   // widget just left of the taskbar apps (menu option, PR #760)
 bool g_brandColors = false;  // off by default; known brands get their color (Razer green, Logitech blue, ...)
 std::atomic<DWORD> g_pollIntervalMs{ 60 * 1000 };  // set from the menu, read by the worker thread
+std::atomic<ULONGLONG> g_lastRefreshTick{ 0 };     // when the last poll finished; the menu shows its age
+std::atomic<bool> g_menuUp{ false };               // a popup menu is currently being shown
+ULONGLONG g_lastMenuOpenTick = 0;                  // UI thread only; rate-limit for opening a menu
+constexpr ULONGLONG kMenuThrottleMs = 350;
 
 struct TrayEntry {
     UINT uid = 0;
@@ -848,7 +852,27 @@ void SmoothCharging(DeviceStatus& s) {
     }
 }
 
+// Devices need a moment to answer again after a resume. While this window is open their previous
+// state is kept (no "asleep"/"offline" flip) and the worker polls often, so a fresh reading shows up
+// within a few seconds instead of at the next regular interval.
+constexpr ULONGLONG kWakeWindowMs = 45000;
+std::atomic<ULONGLONG> g_wakeUntil{ 0 };
+std::set<std::wstring> g_wakeKeys;  // devices that were awake when the machine went to sleep
+
+void RefreshAfterWake(UINT ms);
+void BeginWake() {
+    // The devices we are showing right now are the ones we expect to answer again; a suspend-time
+    // snapshot (when the system sent one) replaces this list in the resume timer below.
+    g_wakeKeys.clear();
+    for (const auto& [k, e] : g_entries)
+        if (e.st.connected && !e.st.asleep) g_wakeKeys.insert(k);
+    g_wakeUntil = GetTickCount64() + kWakeWindowMs;
+    SetEvent(g_refreshEvt);  // poll right away: the devices that are ready update immediately
+    RefreshAfterWake(500);   // closer follow-up pass for the ones still asleep
+}
+
 void OnResults(std::vector<DeviceStatus>& results) {
+    g_lastRefreshTick = GetTickCount64();
     for (auto& s : results) SmoothCharging(s);
     // Remember each answering device's identity for the next session. Write once per poll and only
     // if something changed, so the archive does not churn the registry every minute.
@@ -857,9 +881,21 @@ void OnResults(std::vector<DeviceStatus>& results) {
         if (!g_demo && known_devices::Remember(g_knownDevices, s)) archiveChanged = true;
     if (archiveChanged) known_devices::Save(kSettingsKey, g_knownDevices);
 
+    const ULONGLONG nowTick = GetTickCount64();
+    const bool waking = nowTick < g_wakeUntil.load();
     std::map<std::wstring, bool> seen;
+    bool answered = false;
     for (auto& s : results) {
         auto& e = g_entries[s.key];
+        if (waking && s.connected && s.percent >= 0) {
+            if (g_wakeKeys.erase(s.key)) answered = true;  // this one is back with a real reading
+        } else if (waking && g_wakeKeys.count(s.key) && e.lastPct >= 0) {
+            // The device is still waking up: keep the last level on the taskbar instead of flipping
+            // to a dimmed "asleep" state. The next poll (4 s in this window) will carry the real one.
+            s.percent = e.lastPct;
+            s.asleep = false;
+            s.connected = true;
+        }
         if (!e.uid) e.uid = StableId(s.key);
         const int previousPercent = e.st.connected && !e.st.asleep ? e.st.percent : -1;  // the last fresh reading
         e.st = s;
@@ -896,12 +932,12 @@ void OnResults(std::vector<DeviceStatus>& results) {
                        GetTickCount64() - e.lastSeen <
                            std::max<ULONGLONG>((ULONGLONG)e.st.graceSec * 1000, 2ULL * g_pollIntervalMs) &&
                        !liveNames.count(e.st.name);
-        if (inGrace) {
+        if (inGrace && !waking) {
             e.st.percent = -1;
             e.st.asleep = true;
             ApplyEntry(e);
         }
-        if (!seen.count(it->first) && !inGrace) {
+        if (!seen.count(it->first) && !inGrace && !waking) {
             // A device that stops answering drops out of every driver's results, which used to erase
             // its entry. Keep it instead, marked explicitly offline: "Show disconnected devices" can
             // then bring it back as a dimmed cross, and a device that answers again just overwrites
@@ -918,6 +954,9 @@ void OnResults(std::vector<DeviceStatus>& results) {
             ++it;
         }
     }
+    // Everything that was awake before the sleep has a fresh reading again: back to the normal pace.
+    if (waking && answered && g_wakeKeys.empty())
+        g_wakeUntil = 0;  // everyone we waited for answered: back to the normal pace
     Reconcile();  // react to the new device list now, not at the next timer tick
     UpdatePlaceholder();
     UpdateWidget();
@@ -1211,7 +1250,56 @@ void MoveEntry(const std::wstring& key, int dir) {
 // `settings=true` opens the right-click menu (application settings); false is the left-click menu
 // (devices and their actions). Both are built from the same item list so command ids and the keys /
 // languages / monitors tables stay in sync; only the top-level rows offered differ.
+// Age of the last poll, shown at the right of "Refresh now" ("just now", "12 s ago", "3 min ago").
+std::wstring SinceLastRefresh() {
+    const ULONGLONG at = g_lastRefreshTick.load();
+    if (!at) return {};
+    const unsigned long long secs = (GetTickCount64() - at) / 1000;
+    if (secs < 10) return T(L"just now");
+    if (secs < 60) return TF(L"{seconds} s ago", { { L"seconds", std::to_wstring(secs) } });
+    const unsigned long long mins = secs / 60;
+    if (mins < 60) return TF(L"{minutes} min ago", { { L"minutes", std::to_wstring(mins) } });
+    return TF(L"{hours} h ago", { { L"hours", std::to_wstring(mins / 60) } });
+}
+
+// The popup's PeekMessage loop keeps dispatching messages while it is open, so a click burst
+// leaves a backlog of WM_TRAY / WM_WIDGET_CLICK messages. Merely ignoring them in ShowMenu is not
+// enough: they are dispatched one by one and reopen the menu after the clicks have stopped. Drop
+// the whole backlog whenever an open is suppressed, and again when a menu closes.
+void DropQueuedMenuClicks() {
+    MSG msg;
+    while (PeekMessageW(&msg, g_hwnd, WM_TRAY, WM_TRAY, PM_REMOVE)) {}
+    while (PeekMessageW(&msg, g_hwnd, WM_WIDGET_CLICK, WM_WIDGET_CLICK, PM_REMOVE)) {}
+}
+
+bool MenuOpenIgnored() {
+    if (g_menuUp.load()) {
+        DropQueuedMenuClicks();
+        return true;
+    }
+    if (g_lastMenuOpenTick && GetTickCount64() - g_lastMenuOpenTick < kMenuThrottleMs) {
+        DropQueuedMenuClicks();
+        return true;
+    }
+    return false;
+}
+
 void ShowMenu(bool settings) {
+    if (MenuOpenIgnored()) return;
+    bool expected = false;
+    if (!g_menuUp.compare_exchange_strong(expected, true)) return;
+    g_lastMenuOpenTick = GetTickCount64();
+    struct MenuGuard {
+        bool released = false;
+        void Release() {
+            if (released) return;
+            released = true;
+            g_menuUp.store(false);
+            DropQueuedMenuClicks();  // clicks that arrived just before closing must not open another
+        }
+        ~MenuGuard() { Release(); }
+    } guard;
+
     using Item = popup_menu::Item;
     auto raw = [](std::wstring text, UINT_PTR id) {
         // Menu items open a dialog or submenu right away, so a trailing "..." adds no information.
@@ -1304,6 +1392,7 @@ void ShowMenu(bool settings) {
     // interface, then about/help, and Exit alone at the bottom.
     if (!all.empty()) top.push_back(sep());
     Item refresh = raw(T(L"Refresh now"), ID_REFRESH);
+    refresh.rightText = SinceLastRefresh();
     top.push_back(refresh);
     top.push_back(sep());
     Item history = raw(T(L"Record battery history"), ID_RECORD_HISTORY);
@@ -1610,6 +1699,11 @@ void ShowMenu(bool settings) {
     }
     UINT_PTR cmd = 0;
     bool shownMenu = popup_menu::Show(g_hwnd, pt, top, opt, cmd);
+    // The menu is gone now. Release the flag *before* handling the command: several commands open a
+    // modal window (the settings panel above all), and while that window pumps messages a tray click
+    // must be able to open a new menu. Leaving g_menuUp set until this function returned made every
+    // click during the settings panel get dropped as "a menu is already open".
+    guard.Release();
     if (!shownMenu) return;
     memory_trim::Soon();
     switch (cmd) {
@@ -1888,6 +1982,9 @@ DWORD WINAPI Worker(LPVOID) {
 
         auto* v = new std::vector<DeviceStatus>(g_demo ? DemoDevices() : PollAllDevices());
         DWORD delay = monitor.DelayAfterPoll(*v, g_pollIntervalMs);
+        // Right after a resume the devices trickle back: check every few seconds instead of waiting
+        // for the regular interval, so a device that answers late still shows up almost at once.
+        if (GetTickCount64() < g_wakeUntil.load()) delay = std::min<DWORD>(delay, 4000);
         if (!PostMessageW(g_hwnd, WM_RESULTS, 0, (LPARAM)v)) delete v;
         DWORD wait = WaitForMultipleObjects(2, events, FALSE, delay);
         if (wait == WAIT_OBJECT_0) return 0;
@@ -1916,6 +2013,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_TRAY:
+            if (MenuOpenIgnored()) return 0;
             switch (LOWORD(lp)) {
                 case WM_CONTEXTMENU: ShowMenu(true); break;   // right click: settings
                 case NIN_SELECT:                               // left click: devices
@@ -1923,6 +2021,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         case WM_WIDGET_CLICK:
+            if (MenuOpenIgnored()) return 0;
             ShowMenu(wp != 0);  // widget posts 1 for right click, 0 for left
             return 0;
         case WM_ENDSESSION:  // sign-out / shutdown / installer restart manager
@@ -1966,15 +2065,15 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_POWERBROADCAST:
             if (wp == PBT_APMSUSPEND) {
                 g_awakeBeforeSleep = AwakeDevices();
-            } else if (wp == PBT_APMRESUMEAUTOMATIC) {
-                RefreshAfterWake(5000);
+            } else if (wp == PBT_APMRESUMEAUTOMATIC || wp == PBT_APMRESUMESUSPEND) {
+                BeginWake();
             } else if (wp == PBT_POWERSETTINGCHANGE && lp) {
                 // Modern Standby may not report a suspend / resume: the display turning off and on stands in.
                 auto* ps = reinterpret_cast<const POWERBROADCAST_SETTING*>(lp);
                 if (ps->PowerSetting == kConsoleDisplayStateGuid && ps->DataLength >= sizeof(DWORD)) {
                     DWORD state = *reinterpret_cast<const DWORD*>(ps->Data);
                     if (g_displayState != 0 && state == 0) g_awakeBeforeSleep = AwakeDevices();
-                    else if (g_displayState == 0 && state != 0) RefreshAfterWake(3000);
+                    else if (g_displayState == 0 && state != 0) BeginWake();
                     g_displayState = state;
                 }
             }
@@ -1983,6 +2082,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             if (wp == TIMER_DEBOUNCE) { KillTimer(h, TIMER_DEBOUNCE); SetEvent(g_refreshEvt); }
             if (wp == TIMER_RESUME) {
                 KillTimer(h, TIMER_RESUME);
+                g_wakeKeys = g_awakeBeforeSleep.empty() ? g_wakeKeys : g_awakeBeforeSleep;
                 RequestMonitor(refresh_policy::Mode::Resume, std::move(g_awakeBeforeSleep));
                 g_awakeBeforeSleep.clear();
                 SetEvent(g_refreshEvt);

@@ -282,3 +282,7 @@ Settings... = 设置...
 Automatic = 自动
 Bottom of the taskbar = 任务栏底部
 Loading = 加载中
+just now = 刚刚
+{seconds} s ago = {seconds} 秒前
+{minutes} min ago = {minutes} 分钟前
+{hours} h ago = {hours} 小时前
